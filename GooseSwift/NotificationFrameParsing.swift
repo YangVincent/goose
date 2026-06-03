@@ -135,6 +135,7 @@ struct NotificationFrameInterpretation {
   let movementSample: MovementPacketSample?
   let whoopEvent: WhoopEventSample?
   let dataSignal: WhoopDataSignalSample?
+  let sensorSample: SensorSample?
 }
 
 struct ParsedNotificationFrameResult {

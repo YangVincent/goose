@@ -68,6 +68,8 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
+			F100000000000000000000AB /* WhoopUI/SmartAlarmView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AB /* WhoopUI/SmartAlarmView.swift */; };
+			F100000000000000000000AA /* WhoopUI/SensorSampleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AA /* WhoopUI/SensorSampleStore.swift */; };
 			F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */; };
 			F100000000000000000000A8 /* WhoopAgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A8 /* WhoopAgeView.swift */; };
 			F100000000000000000000A7 /* WhoopTodaySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A7 /* WhoopTodaySection.swift */; };
@@ -219,6 +221,8 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000AB /* WhoopUI/SmartAlarmView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SmartAlarmView.swift; sourceTree = "<group>"; };
+			F200000000000000000000AA /* WhoopUI/SensorSampleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SensorSampleStore.swift; sourceTree = "<group>"; };
 			F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseUploader.swift; sourceTree = "<group>"; };
 			F200000000000000000000A8 /* WhoopAgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAgeView.swift; sourceTree = "<group>"; };
 			F200000000000000000000A7 /* WhoopTodaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopTodaySection.swift; sourceTree = "<group>"; };
@@ -494,6 +498,8 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
+				F200000000000000000000AB /* WhoopUI/SmartAlarmView.swift */,
+				F200000000000000000000AA /* WhoopUI/SensorSampleStore.swift */,
 				F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */,
 				F200000000000000000000A8 /* WhoopAgeView.swift */,
 				F200000000000000000000A7 /* WhoopTodaySection.swift */,
@@ -808,6 +814,8 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
+				F100000000000000000000AB /* WhoopUI/SmartAlarmView.swift in Sources */,
+				F100000000000000000000AA /* WhoopUI/SensorSampleStore.swift in Sources */,
 				F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */,
 				F100000000000000000000A8 /* WhoopAgeView.swift in Sources */,
 				F100000000000000000000A7 /* WhoopTodaySection.swift in Sources */,

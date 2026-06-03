@@ -100,9 +100,17 @@ final class GooseBLEClient: NSObject, ObservableObject {
   static var diagnosticLogSetupWarnings: [String] = []
   let defaults = UserDefaults.standard
   let autoStartPhysiologyCaptureOnReady: Bool = {
+    // Phase 4: default-on. Continuous physiology capture is what triggers
+    // the strap to stream PPG + IMU + optical packets we can persist for
+    // off-device analysis. Was originally debug-gated; we want it baseline
+    // for the strap-independence pipeline. The env var can still disable it
+    // for diagnostic runs.
     let processInfo = ProcessInfo.processInfo
-    return processInfo.arguments.contains("--goose-start-physiology-capture")
-      || processInfo.environment["GOOSE_START_PHYSIOLOGY_CAPTURE"] == "1"
+    if processInfo.arguments.contains("--goose-disable-physiology-capture")
+      || processInfo.environment["GOOSE_DISABLE_PHYSIOLOGY_CAPTURE"] == "1" {
+      return false
+    }
+    return true
   }()
   let autoHistoricalSyncOnReady: Bool = {
     let processInfo = ProcessInfo.processInfo

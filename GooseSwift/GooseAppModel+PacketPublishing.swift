@@ -342,6 +342,55 @@ extension GooseAppModel {
     }
   }
 
+  /// Build a SensorSample from the full Rust-parsed body_summary dict.
+  /// Reads every field the K12/K24 raw_sensor_history variant emits plus
+  /// the K18 normal_history BPM. Returns nil for non-sensor frames.
+  static func extractSensorSample(
+    from parsed: [String: Any],
+    capturedAt: Date
+  ) -> SensorSample? {
+    guard
+      let payload = parsed["parsed_payload"] as? [String: Any],
+      payload["kind"] as? String == "data_packet",
+      let body = payload["body_summary"] as? [String: Any]
+    else {
+      return nil
+    }
+    let kind = body["kind"] as? String
+    guard kind == "raw_sensor_history" || kind == "normal_history" else { return nil }
+
+    let bpm = intValue(body["heart_rate_bpm"])
+    let source = kind == "raw_sensor_history" ? "rust.k12_k24" : "rust.k18"
+    let id = "\(Int(capturedAt.timeIntervalSince1970 * 1000)).\(bpm ?? 0).\(source)"
+
+    // RawSensorHistory wraps the channels under "sensor_data" via Serde;
+    // NormalHistory has no sensor_data block today (K18 SpO₂/gravity work
+    // is still ahead). For K18 we just emit BPM.
+    let sensor = body["sensor_data"] as? [String: Any]
+    let rrArray = body["rr_intervals_ms"] as? [Int]
+    let gravityArray = body["accel_gravity"] as? [Double]
+
+    return SensorSample(
+      id: id,
+      source: source,
+      capturedAt: capturedAt,
+      bpm: bpm,
+      rrIntervalsMS: rrArray,
+      ppgGreen: intValue(sensor?["ppg_green"]),
+      ppgRedIR: intValue(sensor?["ppg_red_ir"]),
+      spo2Red: intValue(sensor?["spo2_red"]),
+      spo2IR: intValue(sensor?["spo2_ir"]),
+      spo2Pct: nil,
+      skinTempRaw: intValue(sensor?["skin_temp_raw"]),
+      ambientLight: intValue(sensor?["ambient_light"]),
+      ledDrive1: intValue(sensor?["led_drive_1"]),
+      ledDrive2: intValue(sensor?["led_drive_2"]),
+      signalQuality: intValue(sensor?["signal_quality"]),
+      skinContact: intValue(sensor?["skin_contact"]),
+      accelGravity: gravityArray
+    )
+  }
+
   static func extractHeartRate(from parsed: [String: Any]) -> Int? {
     guard
       let payload = parsed["parsed_payload"] as? [String: Any],

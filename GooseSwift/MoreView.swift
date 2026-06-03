@@ -100,6 +100,8 @@ struct MoreView: View {
     switch route {
     case .device:
       DeviceView()
+    case .smartAlarm:
+      SmartAlarmView()
     case .profile:
       MoreProfileView()
     case .connectionLab:

@@ -525,7 +525,8 @@ extension GooseAppModel {
         heartRateBPM: nil,
         movementSample: nil,
         whoopEvent: nil,
-        dataSignal: nil
+        dataSignal: nil,
+        sensorSample: nil
       )
     }
 
@@ -549,7 +550,8 @@ extension GooseAppModel {
       whoopEvent: extractWhoopEvent(from: compact, capturedAt: event.capturedAt)
         ?? parsed.flatMap { extractWhoopEvent(from: $0, capturedAt: event.capturedAt) },
       dataSignal: extractWhoopDataSignal(from: compact, capturedAt: event.capturedAt)
-        ?? parsed.flatMap { extractWhoopDataSignal(from: $0, capturedAt: event.capturedAt) }
+        ?? parsed.flatMap { extractWhoopDataSignal(from: $0, capturedAt: event.capturedAt) },
+      sensorSample: parsed.flatMap { extractSensorSample(from: $0, capturedAt: event.capturedAt) }
     )
   }
 
@@ -652,6 +654,14 @@ extension GooseAppModel {
         capturedAt: event.capturedAt,
         minimumInterval: 1
       )
+    }
+
+    // Phase 4: persist the full sensor channel set from K12/K24 packets to
+    // sensor-samples.json so downstream analysis can use PPG, SpO2 ADC,
+    // skin temp ADC, skin-contact bit, ambient light, etc. — all the
+    // channels WHOOP normally ships server-side for off-device DSP.
+    if let sensor = interpretation.sensorSample {
+      SensorSampleStore.shared.append(sensor)
     }
     if let sample = interpretation.movementSample {
       handleMovementPacket(sample)

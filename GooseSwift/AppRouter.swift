@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 final class AppRouter: ObservableObject {
-  @Published var selectedTab: GooseAppTab = .home
+  @Published var selectedTab: GooseAppTab
   @Published var healthPath: [HealthRoute] = []
   @Published var morePath: [MoreRoute] = []
   @Published var codexAuthCallbackURL: URL?
@@ -10,6 +10,24 @@ final class AppRouter: ObservableObject {
   @Published var coachPromptDraft = ""
   @Published var coachPromptRequestID = 0
   @Published var coachScrollToBottomRequestID = 0
+
+  init() {
+    // Allow `xcrun simctl launch booted com.vincenty.goose --goose-launch-tab age`
+    // to land directly on a specific tab during dev iteration. Recognized
+    // values: home / workouts / age / strap. Unrecognized falls back to home.
+    let args = ProcessInfo.processInfo.arguments
+    if let i = args.firstIndex(of: "--goose-launch-tab"),
+       i + 1 < args.count {
+      switch args[i + 1].lowercased() {
+      case "workouts", "health": self.selectedTab = .health
+      case "age", "coach": self.selectedTab = .coach
+      case "strap", "more": self.selectedTab = .more
+      default: self.selectedTab = .home
+      }
+    } else {
+      self.selectedTab = .home
+    }
+  }
 
   func openHealth(_ route: HealthRoute?) {
     selectedTab = .health

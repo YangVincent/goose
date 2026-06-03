@@ -392,11 +392,17 @@ extension GooseBLEClient {
       return false
     }
     guard historicalTransferRequestAttemptCount < historicalTransferMaxRequestAttempts else {
+      // Note: this only means the explicit GET_DATA_RANGE/SEND_HISTORICAL_DATA
+      // command returned no body packets. Data still arrives in parallel via
+      // the notification fan-out path (K18 normal_history packets etc.), which
+      // is separate from `historicalPacketsReceivedThisSync`. So "failed" here
+      // is narrowly about the historical-transfer mechanism, not the overall
+      // data flow.
       let metadataSummary = historyStartReceived || historyEndReceived || historyCompleteReceived
         ? "transfer metadata was received but no historical packet bodies arrived"
         : "a historical transfer never started"
       failHistoricalSync(
-        "GET_DATA_RANGE/SEND_HISTORICAL_DATA produced no historical packet bodies after \(historicalTransferRequestAttemptCount) attempts; \(metadataSummary). Last idle reason: \(reason)."
+        "Historical transfer returned metadata-only after \(historicalTransferRequestAttemptCount) attempts — strap has no new buffered bodies to release (\(metadataSummary), last idle reason: \(reason)). Live HR + K18 notification stream continue independently."
       )
       return true
     }

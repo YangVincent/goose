@@ -9,13 +9,17 @@ struct AppShellView: View {
 
   var body: some View {
     TabView(selection: tabSelection) {
-      ForEach(GooseAppTab.allCases) { tab in
+      ForEach(GooseAppTab.visibleTabs) { tab in
         tabNavigationStack(for: tab)
         .tabItem {
           Label(tab.title, systemImage: tab.systemImage)
         }
         .tag(tab)
       }
+    }
+    .onChange(of: model.ble.lastHistoricalSyncCompletedAt) { _, newValue in
+      guard newValue != nil else { return }
+      healthStore.runPacketInputs()
     }
   }
 
@@ -60,15 +64,11 @@ struct AppShellView: View {
   private func tabContent(for tab: GooseAppTab) -> some View {
     switch tab {
     case .home:
-      HomeDashboardView(
-        healthStore: healthStore,
-        selectedDate: $homeSelectedDate,
-        openHealthRoute: openHomeHealthRoute
-      )
+      WhoopHomeView()
     case .health:
-      HealthView(store: healthStore)
+      WhoopWorkoutsView()
     case .coach:
-      CoachView(healthStore: healthStore)
+      WhoopAgeView()
     case .more:
       MoreView(healthStore: healthStore)
     }
@@ -87,21 +87,23 @@ enum GooseAppTab: String, CaseIterable, Identifiable {
 
   var id: String { rawValue }
 
+  static var visibleTabs: [GooseAppTab] { [.home, .health, .coach, .more] }
+
   var title: String {
     switch self {
     case .home: "Home"
-    case .health: "Health"
-    case .coach: "Coach"
-    case .more: "More"
+    case .health: "Workouts"
+    case .coach: "Age"
+    case .more: "Strap"
     }
   }
 
   var systemImage: String {
     switch self {
     case .home: "house"
-    case .health: "heart.text.square"
-    case .coach: "sparkles"
-    case .more: "ellipsis.circle"
+    case .health: "figure.run"
+    case .coach: "hourglass"
+    case .more: "applewatch"
     }
   }
 

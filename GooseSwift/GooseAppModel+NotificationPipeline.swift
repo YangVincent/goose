@@ -631,11 +631,23 @@ extension GooseAppModel {
     }
 
     if let bpm = interpretation.heartRateBPM {
-      ble.recordLiveHeartRate(bpm, source: "rust.k10", at: event.capturedAt)
+      // Distinguish the source: heartRateBPM now comes either from
+      // raw_motion_k10 (live realtime) or from K18 normal_history packets
+      // (historical sync). The packetType tells us which.
+      let source: String
+      let detail: String
+      if interpretation.packetType == 47 {
+        source = "rust.k18"
+        detail = "K18 normal_history embedded BPM byte"
+      } else {
+        source = "rust.k10"
+        detail = "raw_motion_k10 embedded heart-rate byte"
+      }
+      ble.recordLiveHeartRate(bpm, source: source, at: event.capturedAt)
       recordDeviceSignalPoint(
         family: "HR",
         value: "\(bpm) bpm",
-        detail: "raw_motion_k10 embedded heart-rate byte",
+        detail: detail,
         capturedAt: event.capturedAt,
         minimumInterval: 1
       )

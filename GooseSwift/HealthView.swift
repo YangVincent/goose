@@ -6,6 +6,8 @@ import UIKit
 struct HealthView: View {
   @EnvironmentObject private var model: GooseAppModel
   @ObservedObject var store: HealthDataStore
+  @State private var cachedLandingSnapshots: [HealthRoute: HealthMetricSnapshot] = [:]
+  @State private var cachedHealthMonitorSnapshots: [HealthMetricSnapshot] = []
 
   var body: some View {
     ScrollView {
@@ -63,20 +65,31 @@ struct HealthView: View {
       model.recordUIAction("page.opened", detail: "Health")
       store.loadBridgeCatalogsIfNeeded()
       store.refreshHeartRateTimeline()
+      recomputeHealthState()
+    }
+    .onChange(of: model.ble.liveHeartRateBPM) { _, _ in
+      recomputeHealthState()
+    }
+    .onChange(of: store.packetInputStatus) { _, _ in
+      recomputeHealthState()
+    }
+    .onChange(of: store.catalogStatus) { _, _ in
+      recomputeHealthState()
     }
   }
 
-  private var landingSnapshots: [HealthMetricSnapshot] {
-    store
-      .landingSnapshots(
-        liveHeartRateBPM: model.ble.liveHeartRateBPM,
-        liveHeartRateSource: model.ble.liveHeartRateSource,
-        liveHeartRateUpdatedAt: model.ble.liveHeartRateUpdatedAt
-      )
+  private func recomputeHealthState() {
+    let snapshots = store.landingSnapshots(
+      liveHeartRateBPM: model.ble.liveHeartRateBPM,
+      liveHeartRateSource: model.ble.liveHeartRateSource,
+      liveHeartRateUpdatedAt: model.ble.liveHeartRateUpdatedAt
+    )
+    cachedLandingSnapshots = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.route, $0) })
+    cachedHealthMonitorSnapshots = store.healthMonitorSnapshots()
   }
 
   private var vitalSnapshots: [HealthMetricSnapshot] {
-    Array(store.healthMonitorSnapshots().prefix(4))
+    Array(cachedHealthMonitorSnapshots.prefix(4))
   }
 
   private var liveHeartRateValue: String {
@@ -101,7 +114,7 @@ struct HealthView: View {
 
   private func snapshots(for routes: [HealthRoute]) -> [HealthMetricSnapshot] {
     routes.compactMap { route in
-      landingSnapshots.first { $0.route == route } ?? store.snapshot(for: route)
+      cachedLandingSnapshots[route] ?? store.snapshot(for: route)
     }
   }
 

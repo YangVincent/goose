@@ -132,6 +132,11 @@ pub enum DataPacketBodySummary {
         hr_present: Option<bool>,
         marker_offset: Option<usize>,
         marker_value: Option<u8>,
+        /// For K18 packets, the byte at marker_offset is the BPM value directly
+        /// (per OpenWhoop reverse-engineering of WHOOP 5.0/Maverick). For other
+        /// K-versions in this family (7, 9, 12, 24), the byte is a presence
+        /// marker; the BPM lives elsewhere and we don't extract it yet.
+        heart_rate_bpm: Option<u8>,
     },
     R17OpticalOrLabradorFiltered {
         flags: Option<u16>,
@@ -525,6 +530,10 @@ fn parse_data_packet_body_summary(
                 hr_present: hr_present_marker.map(|marker| marker != 0),
                 marker_offset: hr_marker_offset,
                 marker_value: hr_present_marker,
+                heart_rate_bpm: heart_rate_bpm_for_normal_history(
+                    packet_k,
+                    hr_present_marker,
+                ),
             }),
             Vec::new(),
         ),
@@ -755,6 +764,17 @@ fn data_packet_domain(packet_k: u8) -> Option<&'static str> {
         25 | 26 => "pulse_information_packet",
         _ => return None,
     })
+}
+
+/// For K18 packets the byte at hr_marker_offset is the BPM value directly
+/// (OpenWhoop V18 parser, confirmed by ll0.b.J in WHOOP's APK). Other K-versions
+/// in the normal_history family use the byte as a presence marker; BPM lives
+/// elsewhere and would require version-specific parsing we haven't done yet.
+fn heart_rate_bpm_for_normal_history(packet_k: u8, marker: Option<u8>) -> Option<u8> {
+    match packet_k {
+        18 => marker.filter(|value| *value > 0 && *value < 240),
+        _ => None,
+    }
 }
 
 fn history_hr_marker_offset(packet_k: u8) -> Option<usize> {

@@ -346,12 +346,21 @@ extension GooseAppModel {
     guard
       let payload = parsed["parsed_payload"] as? [String: Any],
       payload["kind"] as? String == "data_packet",
-      let body = payload["body_summary"] as? [String: Any],
-      body["kind"] as? String == "raw_motion_k10"
+      let body = payload["body_summary"] as? [String: Any]
     else {
       return nil
     }
-    return intValue(body["heart_rate"])
+    switch body["kind"] as? String {
+    case "raw_motion_k10":
+      return intValue(body["heart_rate"])
+    case "normal_history":
+      // K18 packets carry BPM directly in marker_value; Rust sets
+      // heart_rate_bpm only for K18. Older K-versions in this family
+      // (7/9/12/24) leave it nil until we add version-specific decoders.
+      return intValue(body["heart_rate_bpm"])
+    default:
+      return nil
+    }
   }
 
   static func extractMovementPacket(

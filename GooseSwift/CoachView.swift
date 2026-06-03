@@ -8,10 +8,11 @@ struct CoachView: View {
   @State private var promptDraft = ""
   @State private var appliedCoachPromptRequestID = 0
   @State private var showingChat = false
+  @State private var cachedCoachSnapshot: CoachOverviewSnapshot?
 
   var body: some View {
     CoachOverviewScreen(
-      snapshot: coachSnapshot,
+      snapshot: cachedCoachSnapshot ?? coachSnapshot,
       chatIsSignedIn: chat.isSignedIn,
       chatStatus: chatStatus,
       openChat: { openChat(prompt: nil) },
@@ -57,6 +58,16 @@ struct CoachView: View {
       healthStore.refreshPacketInputsIfNeeded()
       chat.refreshAuth()
       applyRequestedCoachPromptIfNeeded()
+      cachedCoachSnapshot = coachSnapshot
+    }
+    .onChange(of: model.ble.liveHeartRateBPM) { _, _ in
+      cachedCoachSnapshot = coachSnapshot
+    }
+    .onChange(of: healthStore.packetInputStatus) { _, _ in
+      cachedCoachSnapshot = coachSnapshot
+    }
+    .onChange(of: healthStore.catalogStatus) { _, _ in
+      cachedCoachSnapshot = coachSnapshot
     }
     .onChange(of: router.codexEmbeddedLoginRequestID) { _, requestID in
       guard requestID > 0, !chat.isSignedIn else {

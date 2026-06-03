@@ -16,6 +16,7 @@ struct MoreView: View {
   @AppStorage(OnboardingStorage.unitSystem) private var profileUnitSystemRaw = "imperial"
   @AppStorage(OnboardingStorage.heightMm) private var profileHeightMm = 0
   @AppStorage(OnboardingStorage.weightGrams) private var profileWeightGrams = 0
+  @State private var cachedRouteStatus: MoreRouteStatus?
 
   @MainActor
   init(healthStore: HealthDataStore) {
@@ -73,11 +74,15 @@ struct MoreView: View {
       model.recordUIAction("page.opened", detail: "More")
       store.refreshBridgeStatus(model: model)
       store.refreshRecentCaptureSessions()
+      cachedRouteStatus = store.routeStatus(ble: model.ble, model: model)
+    }
+    .onChange(of: model.ble.connectionState) { _, _ in
+      cachedRouteStatus = store.routeStatus(ble: model.ble, model: model)
     }
   }
 
   private var routeStatus: MoreRouteStatus {
-    store.routeStatus(ble: model.ble, model: model)
+    cachedRouteStatus ?? store.routeStatus(ble: model.ble, model: model)
   }
 
   @ViewBuilder

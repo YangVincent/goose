@@ -9,14 +9,18 @@ struct HomeDashboardView: View {
   @State private var showingScoreDatePicker = false
   @State private var showingCardioLoadSheet = false
   @State private var selectedHealthMonitorTrend: HealthMetricSnapshot?
+  @State private var cachedLandingSnapshots: [HealthRoute: HealthMetricSnapshot] = [:]
+  @State private var cachedCardioLoadDays: [CardioLoadDay] = []
+  @State private var cachedHealthMonitorSnapshots: [HealthMetricSnapshot] = []
+  @State private var cachedHomeCoachTip: CoachInlineTip?
 
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 18) {
-        HomeDailyScoreCard(
+        HomeWhoopScoreCard(
           scores: scoreSnapshots,
           actionSummary: dailyActionSummary,
-          coachTip: CoachTipFactory.homeTip(healthStore: healthStore, appModel: model),
+          coachTip: cachedHomeCoachTip ?? CoachTipFactory.homeTip(healthStore: healthStore, appModel: model),
           openScore: openHealth,
           openCoach: openCoach
         )
@@ -29,14 +33,16 @@ struct HomeDashboardView: View {
 
         HomeCardioLoadWidget(
           snapshot: landingSnapshot(for: .cardioLoad),
-          days: healthStore.cardioLoadWeeklyPoints()
+          days: cachedCardioLoadDays.isEmpty ? healthStore.cardioLoadWeeklyPoints() : cachedCardioLoadDays
         ) {
           showingCardioLoadSheet = true
           model.recordUIAction("health.sheet.opened", detail: "Cardio Load home widget")
         }
 
         HomeHealthMonitorSection(
-          snapshots: healthStore.healthMonitorSnapshots(allowLiveFallbacks: false),
+          snapshots: cachedHealthMonitorSnapshots.isEmpty
+            ? healthStore.healthMonitorSnapshots(allowLiveFallbacks: false)
+            : cachedHealthMonitorSnapshots,
           openSnapshot: openHealthMonitorSnapshot
         )
 
@@ -92,12 +98,22 @@ struct HomeDashboardView: View {
     .onAppear {
       model.recordUIAction("page.opened", detail: "Home")
     }
-    .task {
+    .task(id: selectedDate) {
       healthStore.loadBridgeCatalogsIfNeeded()
       model.refreshActivityTimeline(for: selectedDate)
+      recomputeHomeState()
     }
     .onChange(of: selectedDate) { _, newValue in
       model.refreshActivityTimeline(for: newValue)
+    }
+    .onChange(of: model.ble.liveHeartRateBPM) { _, _ in
+      recomputeHomeState()
+    }
+    .onChange(of: healthStore.packetInputStatus) { _, _ in
+      recomputeHomeState()
+    }
+    .onChange(of: healthStore.catalogStatus) { _, _ in
+      recomputeHomeState()
     }
     .sheet(isPresented: $showingScoreDatePicker) {
       ScoreDatePickerSheet(
@@ -156,17 +172,21 @@ struct HomeDashboardView: View {
     return healthStore.packetDerivedScoreNextActionSummary()
   }
 
-  private var landingSnapshots: [HealthMetricSnapshot] {
-    healthStore.landingSnapshots(
+  private func recomputeHomeState() {
+    let snapshots = healthStore.landingSnapshots(
       liveHeartRateBPM: model.ble.liveHeartRateBPM,
       liveHeartRateSource: model.ble.liveHeartRateSource,
       liveHeartRateUpdatedAt: model.ble.liveHeartRateUpdatedAt,
       stableDailyMetrics: true
     )
+    cachedLandingSnapshots = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.route, $0) })
+    cachedCardioLoadDays = healthStore.cardioLoadWeeklyPoints()
+    cachedHealthMonitorSnapshots = healthStore.healthMonitorSnapshots(allowLiveFallbacks: false)
+    cachedHomeCoachTip = CoachTipFactory.homeTip(healthStore: healthStore, appModel: model)
   }
 
   private func landingSnapshot(for route: HealthRoute) -> HealthMetricSnapshot {
-    landingSnapshots.first { $0.route == route } ?? healthStore.snapshot(for: route)
+    cachedLandingSnapshots[route] ?? healthStore.snapshot(for: route)
   }
 
   private func homeSnapshot(for route: HealthRoute) -> HealthMetricSnapshot {

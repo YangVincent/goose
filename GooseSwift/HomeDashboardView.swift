@@ -17,7 +17,7 @@ struct HomeDashboardView: View {
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 18) {
-        HomeWhoopScoreCard(
+        WhoopScoreCard(
           scores: scoreSnapshots,
           actionSummary: dailyActionSummary,
           coachTip: cachedHomeCoachTip ?? CoachTipFactory.homeTip(healthStore: healthStore, appModel: model),

@@ -68,13 +68,14 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
+			F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */; };
 			F100000000000000000000A8 /* WhoopAgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A8 /* WhoopAgeView.swift */; };
 			F100000000000000000000A7 /* WhoopTodaySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A7 /* WhoopTodaySection.swift */; };
 			F100000000000000000000A1 /* WhoopAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A1 /* WhoopAPIClient.swift */; };
 			F100000000000000000000A2 /* WhoopHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A2 /* WhoopHomeView.swift */; };
 			F100000000000000000000A3 /* WhoopMetricDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A3 /* WhoopMetricDetailView.swift */; };
-			F100000000000000000000A4 /* HomeWhoopScoreCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A4 /* HomeWhoopScoreCard.swift */; };
-			F100000000000000000000A5 /* HomeWhoopSleepCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A5 /* HomeWhoopSleepCard.swift */; };
+			F100000000000000000000A4 /* WhoopScoreCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A4 /* WhoopScoreCard.swift */; };
+			F100000000000000000000A5 /* WhoopSleepCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A5 /* WhoopSleepCard.swift */; };
 			F100000000000000000000A6 /* WhoopWorkoutsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A6 /* WhoopWorkoutsView.swift */; };
 			D10000000000000000000032 /* GooseBLETypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000032 /* GooseBLETypes.swift */; };
 			D10000000000000000000033 /* GooseBLEClient+UserActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000033 /* GooseBLEClient+UserActions.swift */; };
@@ -218,14 +219,15 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
-			F200000000000000000000A8 /* WhoopAgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopAgeView.swift; sourceTree = "<group>"; };
-			F200000000000000000000A7 /* WhoopTodaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopTodaySection.swift; sourceTree = "<group>"; };
-			F200000000000000000000A1 /* WhoopAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopAPIClient.swift; sourceTree = "<group>"; };
-			F200000000000000000000A2 /* WhoopHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopHomeView.swift; sourceTree = "<group>"; };
-			F200000000000000000000A3 /* WhoopMetricDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopMetricDetailView.swift; sourceTree = "<group>"; };
-			F200000000000000000000A4 /* HomeWhoopScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWhoopScoreCard.swift; sourceTree = "<group>"; };
-			F200000000000000000000A5 /* HomeWhoopSleepCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWhoopSleepCard.swift; sourceTree = "<group>"; };
-			F200000000000000000000A6 /* WhoopWorkoutsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopWorkoutsView.swift; sourceTree = "<group>"; };
+			F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseUploader.swift; sourceTree = "<group>"; };
+			F200000000000000000000A8 /* WhoopAgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAgeView.swift; sourceTree = "<group>"; };
+			F200000000000000000000A7 /* WhoopTodaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopTodaySection.swift; sourceTree = "<group>"; };
+			F200000000000000000000A1 /* WhoopAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAPIClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000A2 /* WhoopHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopHomeView.swift; sourceTree = "<group>"; };
+			F200000000000000000000A3 /* WhoopMetricDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopMetricDetailView.swift; sourceTree = "<group>"; };
+			F200000000000000000000A4 /* WhoopScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopScoreCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000A5 /* WhoopSleepCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopSleepCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000A6 /* WhoopWorkoutsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopWorkoutsView.swift; sourceTree = "<group>"; };
 			D20000000000000000000032 /* GooseBLETypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLETypes.swift; sourceTree = "<group>"; };
 			D20000000000000000000033 /* GooseBLEClient+UserActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GooseBLEClient+UserActions.swift"; sourceTree = "<group>"; };
 			D20000000000000000000034 /* GooseBLEClient+VitalsAndLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GooseBLEClient+VitalsAndLogging.swift"; sourceTree = "<group>"; };
@@ -492,13 +494,14 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
+				F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */,
 				F200000000000000000000A8 /* WhoopAgeView.swift */,
 				F200000000000000000000A7 /* WhoopTodaySection.swift */,
 				F200000000000000000000A1 /* WhoopAPIClient.swift */,
 				F200000000000000000000A2 /* WhoopHomeView.swift */,
 				F200000000000000000000A3 /* WhoopMetricDetailView.swift */,
-				F200000000000000000000A4 /* HomeWhoopScoreCard.swift */,
-				F200000000000000000000A5 /* HomeWhoopSleepCard.swift */,
+				F200000000000000000000A4 /* WhoopScoreCard.swift */,
+				F200000000000000000000A5 /* WhoopSleepCard.swift */,
 				F200000000000000000000A6 /* WhoopWorkoutsView.swift */,
 				D20000000000000000000032 /* GooseBLETypes.swift */,
 				D20000000000000000000033 /* GooseBLEClient+UserActions.swift */,
@@ -805,13 +808,14 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
+				F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */,
 				F100000000000000000000A8 /* WhoopAgeView.swift in Sources */,
 				F100000000000000000000A7 /* WhoopTodaySection.swift in Sources */,
 				F100000000000000000000A1 /* WhoopAPIClient.swift in Sources */,
 				F100000000000000000000A2 /* WhoopHomeView.swift in Sources */,
 				F100000000000000000000A3 /* WhoopMetricDetailView.swift in Sources */,
-				F100000000000000000000A4 /* HomeWhoopScoreCard.swift in Sources */,
-				F100000000000000000000A5 /* HomeWhoopSleepCard.swift in Sources */,
+				F100000000000000000000A4 /* WhoopScoreCard.swift in Sources */,
+				F100000000000000000000A5 /* WhoopSleepCard.swift in Sources */,
 				F100000000000000000000A6 /* WhoopWorkoutsView.swift in Sources */,
 				D10000000000000000000032 /* GooseBLETypes.swift in Sources */,
 				D10000000000000000000033 /* GooseBLEClient+UserActions.swift in Sources */,

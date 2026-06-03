@@ -631,14 +631,15 @@ extension GooseAppModel {
     }
 
     if let bpm = interpretation.heartRateBPM {
-      // Distinguish the source: heartRateBPM now comes either from
-      // raw_motion_k10 (live realtime) or from K18 normal_history packets
-      // (historical sync). The packetType tells us which.
+      // Distinguish the BPM source so heart-rate-samples.json carries
+      // accurate provenance. packetType 47 is HISTORICAL_DATA (carries K18
+      // normal_history OR K12/K24 raw_sensor_history); 40/43 carry the
+      // realtime K10 motion stream.
       let source: String
       let detail: String
       if interpretation.packetType == 47 {
-        source = "rust.k18"
-        detail = "K18 normal_history embedded BPM byte"
+        source = "rust.k_history"
+        detail = "Historical-data packet embedded BPM (K12/K18/K24)"
       } else {
         source = "rust.k10"
         detail = "raw_motion_k10 embedded heart-rate byte"

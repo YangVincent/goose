@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct HomeWhoopSleepCard: View {
+struct WhoopSleepCard: View {
   let sleep: PrimarySleepDetail?
   let openDetail: () -> Void
 

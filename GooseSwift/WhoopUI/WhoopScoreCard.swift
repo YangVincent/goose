@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct HomeWhoopScoreCard: View {
+struct WhoopScoreCard: View {
   let scores: [HealthMetricSnapshot]
   let actionSummary: String
   let coachTip: CoachInlineTip

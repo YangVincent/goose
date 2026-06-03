@@ -21,6 +21,13 @@ struct AppShellView: View {
       guard newValue != nil else { return }
       healthStore.runPacketInputs()
     }
+    .task {
+      // Phase 3: push the day's collected HR samples to the dashboard server
+      // so /api/whoop/healthspan can compute zones from real all-day data.
+      // Idempotent on the server (upsert by date), runs only if last upload
+      // is older than the uploader's minimum interval.
+      await GooseUploader.shared.uploadNowIfStale()
+    }
   }
 
   private var tabSelection: Binding<GooseAppTab> {

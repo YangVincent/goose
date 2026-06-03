@@ -356,7 +356,13 @@ extension GooseAppModel {
     case "normal_history":
       // K18 packets carry BPM directly in marker_value; Rust sets
       // heart_rate_bpm only for K18. Older K-versions in this family
-      // (7/9/12/24) leave it nil until we add version-specific decoders.
+      // (7/9) leave it nil until we add version-specific decoders.
+      return intValue(body["heart_rate_bpm"])
+    case "raw_sensor_history":
+      // K12/K24 packets, via the OpenWhoop V12 parser port. BPM is one of
+      // several extracted channels; the SensorData side-effects (PPG, SpO2
+      // ADC, skin temp ADC, etc.) are persisted separately when an
+      // active capture / persistence consumer is wired up.
       return intValue(body["heart_rate_bpm"])
     default:
       return nil

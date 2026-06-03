@@ -58,7 +58,7 @@ impl DeviceType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParsedFrame {
     pub device_type: DeviceType,
     pub raw_len: usize,
@@ -76,7 +76,7 @@ pub struct ParsedFrame {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ParsedPayload {
     Command {
@@ -125,7 +125,7 @@ pub enum ParsedPayload {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DataPacketBodySummary {
     NormalHistory {
@@ -159,6 +159,49 @@ pub enum DataPacketBodySummary {
         axes: Vec<I16SeriesSummary>,
         warnings: Vec<String>,
     },
+    /// K12 / K24 packets with the full DSP sensor channel set. Ported from
+    /// OpenWhoop's parse_historical_packet_v12. Offsets are into the V5
+    /// payload (same coordinate system as `parsed_payload.body_offset` minus 13).
+    RawSensorHistory {
+        heart_rate_bpm: Option<u8>,
+        rr_count: Option<u8>,
+        rr_intervals_ms: Vec<u16>,
+        sensor_data: Option<SensorData>,
+        accel_gravity: Option<[f32; 3]>,
+        warnings: Vec<String>,
+    },
+}
+
+/// Raw DSP sensor channels extracted from K12 / K24 historical packets.
+/// All values are raw ADC readings unless noted. WHOOP normally uploads
+/// these to their server for off-device post-processing; we parse them on
+/// device so users own the raw signal.
+///
+/// Field offsets within the packet payload (per OpenWhoop V12 parser):
+///   ppg_green       u16 LE @ 26
+///   ppg_red_ir      u16 LE @ 28
+///   spo2_red        u16 LE @ 61
+///   spo2_ir         u16 LE @ 63
+///   skin_temp_raw   u16 LE @ 65
+///   ambient_light   u16 LE @ 67
+///   led_drive_1     u16 LE @ 69
+///   led_drive_2     u16 LE @ 71
+///   resp_rate_raw   u16 LE @ 73
+///   signal_quality  u16 LE @ 75
+///   skin_contact    u8 @ 48
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SensorData {
+    pub ppg_green: u16,
+    pub ppg_red_ir: u16,
+    pub spo2_red: u16,
+    pub spo2_ir: u16,
+    pub skin_temp_raw: u16,
+    pub ambient_light: u16,
+    pub led_drive_1: u16,
+    pub led_drive_2: u16,
+    pub resp_rate_raw: u16,
+    pub signal_quality: u16,
+    pub skin_contact: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -525,7 +568,12 @@ fn parse_data_packet_body_summary(
     };
 
     match packet_k {
-        7 | 9 | 12 | 18 | 24 => (
+        // K12 and K24 historical packets carry the full DSP sensor channel
+        // set (PPG, SpO2 ADC, skin temp ADC, ambient light, LED drive, signal
+        // quality, skin contact, gravity vector) plus BPM + RR intervals.
+        // Use the richer parser, ported from OpenWhoop V12.
+        12 | 24 => parse_k12_k24_body_summary(payload),
+        7 | 9 | 18 => (
             Some(DataPacketBodySummary::NormalHistory {
                 hr_present: hr_present_marker.map(|marker| marker != 0),
                 marker_offset: hr_marker_offset,
@@ -764,6 +812,81 @@ fn data_packet_domain(packet_k: u8) -> Option<&'static str> {
         25 | 26 => "pulse_information_packet",
         _ => return None,
     })
+}
+
+/// Parse a K12 / K24 packet body. Extracts BPM, RR intervals, accelerometer
+/// gravity vector, and the full DSP sensor channel set (PPG, SpO2 ADC, skin
+/// temp ADC, ambient light, LED drive, signal quality, skin contact).
+///
+/// Layout ported from OpenWhoop's parse_historical_packet_v12 — byte offsets
+/// are into the V5 payload (Goose `payload`). Requires the payload to be at
+/// least 77 bytes; shorter payloads return None.
+fn parse_k12_k24_body_summary(payload: &[u8]) -> (Option<DataPacketBodySummary>, Vec<String>) {
+    let mut warnings = Vec::new();
+    if payload.len() < 77 {
+        warnings.push("k12_k24_body_too_short".to_string());
+        return (None, warnings);
+    }
+
+    let bpm = payload[14];
+    let heart_rate_bpm = if (1..240).contains(&bpm) { Some(bpm) } else { None };
+    let rr_count_raw = payload[15];
+    // OpenWhoop iterates min(rr_count, 4) RR slots, each u16 LE. Non-zero
+    // values get pushed; the rest are skipped.
+    let rr_count = rr_count_raw.min(4) as usize;
+    let mut rr_intervals_ms = Vec::with_capacity(rr_count);
+    for index in 0..rr_count {
+        let offset = 16 + index * 2;
+        if let Some(value) = read_u16_le(payload, offset) {
+            if value != 0 {
+                rr_intervals_ms.push(value);
+            }
+        }
+    }
+
+    let accel_gravity = if payload.len() >= 45 {
+        let mut gravity = [0.0f32; 3];
+        for (index, slot) in gravity.iter_mut().enumerate() {
+            let offset = 33 + index * 4;
+            if let (Some(b0), Some(b1), Some(b2), Some(b3)) = (
+                payload.get(offset).copied(),
+                payload.get(offset + 1).copied(),
+                payload.get(offset + 2).copied(),
+                payload.get(offset + 3).copied(),
+            ) {
+                *slot = f32::from_le_bytes([b0, b1, b2, b3]);
+            }
+        }
+        Some(gravity)
+    } else {
+        None
+    };
+
+    let sensor_data = SensorData {
+        ppg_green: read_u16_le(payload, 26).unwrap_or(0),
+        ppg_red_ir: read_u16_le(payload, 28).unwrap_or(0),
+        spo2_red: read_u16_le(payload, 61).unwrap_or(0),
+        spo2_ir: read_u16_le(payload, 63).unwrap_or(0),
+        skin_temp_raw: read_u16_le(payload, 65).unwrap_or(0),
+        ambient_light: read_u16_le(payload, 67).unwrap_or(0),
+        led_drive_1: read_u16_le(payload, 69).unwrap_or(0),
+        led_drive_2: read_u16_le(payload, 71).unwrap_or(0),
+        resp_rate_raw: read_u16_le(payload, 73).unwrap_or(0),
+        signal_quality: read_u16_le(payload, 75).unwrap_or(0),
+        skin_contact: payload.get(48).copied().unwrap_or(0),
+    };
+
+    (
+        Some(DataPacketBodySummary::RawSensorHistory {
+            heart_rate_bpm,
+            rr_count: Some(rr_count_raw),
+            rr_intervals_ms,
+            sensor_data: Some(sensor_data),
+            accel_gravity,
+            warnings: warnings.clone(),
+        }),
+        warnings,
+    )
 }
 
 /// For K18 packets the byte at hr_marker_offset is the BPM value directly

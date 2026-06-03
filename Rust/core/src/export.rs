@@ -2391,6 +2391,14 @@ fn export_sensor_samples(
                     )?;
                 }
             }
+            DataPacketBodySummary::RawSensorHistory { .. } => {
+                // K12/K24 sensor channels are emitted through the live HR
+                // path in Swift (see GooseAppModel+NotificationPipeline) and
+                // a future sensor-samples persistence layer. We don't emit
+                // them as decoded-frame sample rows yet to avoid blowing up
+                // raw-export size; revisit if/when we need per-channel rows
+                // in the offline analysis tooling.
+            }
         }
     }
     Ok(rows)

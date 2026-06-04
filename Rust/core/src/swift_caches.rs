@@ -1246,6 +1246,132 @@ impl GooseStore {
         Ok(out)
     }
 
+    /// Persist (or overwrite) the per-session sleep reading. Keyed on
+    /// `session_id` so re-running the analysis -- either from a different
+    /// `End Sleep` tap, a UI "recompute" action, or a backfill script --
+    /// supersedes the prior row cleanly.
+    pub fn upsert_sleep_reading(
+        &self,
+        reading: &crate::sleep_reading::SleepReading,
+    ) -> GooseResult<()> {
+        let session_id = reading
+            .session_id
+            .as_deref()
+            .ok_or_else(|| GooseError::message("sleep reading session_id is required"))?;
+        let reading_json = serde_json::to_string(reading)
+            .map_err(|error| GooseError::message(error.to_string()))?;
+        self.conn.execute(
+            r#"
+            INSERT INTO sleep_readings (
+                session_id, start_time_unix_ms, end_time_unix_ms,
+                time_in_bed_minutes, total_sleep_minutes, deep_minutes,
+                light_minutes, awake_minutes, efficiency,
+                deep_share_of_sleep, awake_share_of_bed,
+                onset_latency_minutes, wake_after_sleep_onset_minutes,
+                hr_mean_bpm, hr_min_bpm, hr_max_bpm,
+                hrv_mean_rmssd_ms, hrv_sample_count,
+                movement_total_intensity, movement_peak_minute,
+                movement_burst_minutes,
+                duration_score, efficiency_score, depth_score,
+                hrv_score, restfulness_score, sleep_score,
+                resting_bpm_used, hrv_baseline_ms_used, need_hours,
+                reading_json
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+                ?25, ?26, ?27, ?28, ?29, ?30, ?31
+            )
+            ON CONFLICT(session_id) DO UPDATE SET
+                start_time_unix_ms = excluded.start_time_unix_ms,
+                end_time_unix_ms = excluded.end_time_unix_ms,
+                time_in_bed_minutes = excluded.time_in_bed_minutes,
+                total_sleep_minutes = excluded.total_sleep_minutes,
+                deep_minutes = excluded.deep_minutes,
+                light_minutes = excluded.light_minutes,
+                awake_minutes = excluded.awake_minutes,
+                efficiency = excluded.efficiency,
+                deep_share_of_sleep = excluded.deep_share_of_sleep,
+                awake_share_of_bed = excluded.awake_share_of_bed,
+                onset_latency_minutes = excluded.onset_latency_minutes,
+                wake_after_sleep_onset_minutes = excluded.wake_after_sleep_onset_minutes,
+                hr_mean_bpm = excluded.hr_mean_bpm,
+                hr_min_bpm = excluded.hr_min_bpm,
+                hr_max_bpm = excluded.hr_max_bpm,
+                hrv_mean_rmssd_ms = excluded.hrv_mean_rmssd_ms,
+                hrv_sample_count = excluded.hrv_sample_count,
+                movement_total_intensity = excluded.movement_total_intensity,
+                movement_peak_minute = excluded.movement_peak_minute,
+                movement_burst_minutes = excluded.movement_burst_minutes,
+                duration_score = excluded.duration_score,
+                efficiency_score = excluded.efficiency_score,
+                depth_score = excluded.depth_score,
+                hrv_score = excluded.hrv_score,
+                restfulness_score = excluded.restfulness_score,
+                sleep_score = excluded.sleep_score,
+                resting_bpm_used = excluded.resting_bpm_used,
+                hrv_baseline_ms_used = excluded.hrv_baseline_ms_used,
+                need_hours = excluded.need_hours,
+                reading_json = excluded.reading_json,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            "#,
+            params![
+                session_id,
+                reading.start_time_unix_ms,
+                reading.end_time_unix_ms,
+                reading.time_in_bed_minutes,
+                reading.total_sleep_minutes,
+                reading.deep_minutes,
+                reading.light_minutes,
+                reading.awake_minutes,
+                reading.efficiency,
+                reading.deep_share_of_sleep,
+                reading.awake_share_of_bed,
+                reading.onset_latency_minutes,
+                reading.wake_after_sleep_onset_minutes,
+                reading.hr_mean_bpm,
+                reading.hr_min_bpm,
+                reading.hr_max_bpm,
+                reading.hrv_mean_rmssd_ms,
+                reading.hrv_sample_count,
+                reading.movement_total_intensity,
+                reading.movement_peak_minute,
+                reading.movement_burst_minutes,
+                reading.duration_score,
+                reading.efficiency_score,
+                reading.depth_score,
+                reading.hrv_score,
+                reading.restfulness_score,
+                reading.sleep_score,
+                reading.resting_bpm_used,
+                reading.hrv_baseline_ms_used,
+                reading.need_hours,
+                reading_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn sleep_reading_for_session(
+        &self,
+        session_id: &str,
+    ) -> GooseResult<Option<crate::sleep_reading::SleepReading>> {
+        use rusqlite::OptionalExtension;
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT reading_json FROM sleep_readings WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match raw {
+            None => Ok(None),
+            Some(text) => serde_json::from_str(&text)
+                .map(Some)
+                .map_err(|error| GooseError::message(error.to_string())),
+        }
+    }
+
     /// One row per STRAP_CONDITION_REPORT (~every 10 minutes) covering the
     /// requested window. Callers use this to derive worn intervals: each
     /// pair of consecutive same-value rows defines a confirmed worn/off

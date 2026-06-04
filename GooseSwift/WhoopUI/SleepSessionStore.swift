@@ -66,6 +66,10 @@ final class SleepSessionStore: ObservableObject {
   static let sessionStartedNotification = Notification.Name("goose.sleep.session.started")
   /// Posted on End Sleep, or when a stale restore is discarded.
   static let sessionEndedNotification = Notification.Name("goose.sleep.session.ended")
+  /// Posted after sleep.compute_reading returns; userInfo carries the
+  /// session id and the raw bridge response. SleepDetailView observes
+  /// this to refresh the per-session sleep card.
+  static let sleepReadingComputedNotification = Notification.Name("goose.sleep.reading.computed")
 
   init() {
     pastSessions = Self.loadPersisted(key: storageKey)
@@ -135,6 +139,37 @@ final class SleepSessionStore: ObservableObject {
       object: nil,
       userInfo: ["endedAt": now]
     )
+    computeAndStoreReading(for: past)
+  }
+
+  /// Kick off the Rust-side sleep_reading computation for the just-ended
+  /// session. Runs off the main thread; result is persisted into the
+  /// sleep_readings SQLite table by the bridge and observable via the
+  /// `sleepReadingComputedNotification` (carries the session id).
+  private func computeAndStoreReading(for past: PastSession) {
+    let bridge = GooseRustBridge()
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let sessionID = past.id.uuidString
+    let startMs = Int64((past.startedAt.timeIntervalSince1970 * 1000).rounded())
+    let endMs = Int64((past.endedAt.timeIntervalSince1970 * 1000).rounded())
+    Task.detached(priority: .userInitiated) {
+      let result = try? bridge.request(
+        method: "sleep.compute_reading",
+        args: [
+          "database_path": dbPath,
+          "session_id": sessionID,
+          "start_time_unix_ms": startMs,
+          "end_time_unix_ms": endMs,
+        ]
+      )
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: Self.sleepReadingComputedNotification,
+          object: nil,
+          userInfo: ["sessionId": sessionID, "reading": result as Any]
+        )
+      }
+    }
   }
 
   // MARK: - Evaluator

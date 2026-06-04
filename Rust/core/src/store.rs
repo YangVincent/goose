@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 19;
+pub const CURRENT_SCHEMA_VERSION: i64 = 20;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -1744,6 +1744,53 @@ impl GooseStore {
 
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (19);
             PRAGMA user_version = 19;
+
+            -- v20: typed mirror for sleep readings, one row per
+            -- SleepSessionStore session. The bridge method
+            -- sleep.compute_reading writes here when the iOS "End Sleep"
+            -- button is tapped (and during retroactive backfills).
+            CREATE TABLE IF NOT EXISTS sleep_readings (
+                session_id TEXT PRIMARY KEY,
+                start_time_unix_ms INTEGER NOT NULL,
+                end_time_unix_ms INTEGER NOT NULL,
+                time_in_bed_minutes INTEGER NOT NULL,
+                total_sleep_minutes INTEGER NOT NULL,
+                deep_minutes INTEGER NOT NULL,
+                light_minutes INTEGER NOT NULL,
+                awake_minutes INTEGER NOT NULL,
+                efficiency REAL NOT NULL,
+                deep_share_of_sleep REAL NOT NULL,
+                awake_share_of_bed REAL NOT NULL,
+                onset_latency_minutes INTEGER,
+                wake_after_sleep_onset_minutes INTEGER NOT NULL,
+                hr_mean_bpm REAL,
+                hr_min_bpm INTEGER,
+                hr_max_bpm INTEGER,
+                hrv_mean_rmssd_ms REAL NOT NULL,
+                hrv_sample_count INTEGER NOT NULL,
+                movement_total_intensity REAL NOT NULL,
+                movement_peak_minute REAL NOT NULL,
+                movement_burst_minutes INTEGER NOT NULL,
+                duration_score REAL NOT NULL,
+                efficiency_score REAL NOT NULL,
+                depth_score REAL NOT NULL,
+                hrv_score REAL NOT NULL,
+                restfulness_score REAL NOT NULL,
+                sleep_score REAL NOT NULL,
+                resting_bpm_used INTEGER NOT NULL,
+                hrv_baseline_ms_used REAL NOT NULL,
+                need_hours REAL NOT NULL,
+                reading_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sleep_readings_start
+                ON sleep_readings(start_time_unix_ms);
+            CREATE INDEX IF NOT EXISTS idx_sleep_readings_end
+                ON sleep_readings(end_time_unix_ms);
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (20);
+            PRAGMA user_version = 20;
             "#,
         )?;
         self.drop_decoded_frame_parsed_payload_json_column()?;

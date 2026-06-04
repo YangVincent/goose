@@ -2549,6 +2549,14 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(swift_caches_append_sleep_audio_event_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "sleep.compute_reading" => request_args::<SleepComputeReadingArgs>(&request)
+            .and_then(sleep_compute_reading_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "sleep.get_reading" => request_args::<SleepGetReadingArgs>(&request)
+            .and_then(sleep_get_reading_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "swift_caches.list_strap_worn_samples" => request_args::<SwiftCacheRangeArgs>(&request)
             .and_then(swift_caches_list_strap_worn_samples_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -8040,6 +8048,26 @@ struct SwiftSleepAudioEventAppendArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct SleepComputeReadingArgs {
+    database_path: String,
+    session_id: String,
+    start_time_unix_ms: i64,
+    end_time_unix_ms: i64,
+    #[serde(default)]
+    resting_bpm: Option<i64>,
+    #[serde(default)]
+    hrv_baseline_ms: Option<f64>,
+    #[serde(default)]
+    need_hours: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SleepGetReadingArgs {
+    database_path: String,
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SwiftCacheRangeLimitArgs {
     database_path: String,
     start_time_unix_ms: i64,
@@ -8382,6 +8410,31 @@ fn swift_caches_append_sleep_audio_event_bridge(
         "schema": "goose.swift-cache-append.v1",
         "inserted": inserted,
     }))
+}
+
+fn sleep_compute_reading_bridge(args: SleepComputeReadingArgs) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let defaults = crate::sleep_reading::SleepReadingOptions::default();
+    let options = crate::sleep_reading::SleepReadingOptions {
+        resting_bpm: args.resting_bpm.unwrap_or(defaults.resting_bpm),
+        hrv_baseline_ms: args.hrv_baseline_ms.unwrap_or(defaults.hrv_baseline_ms),
+        need_hours: args.need_hours.unwrap_or(defaults.need_hours),
+    };
+    let reading = crate::sleep_reading::compute_sleep_reading(
+        &store.conn,
+        Some(args.session_id.as_str()),
+        args.start_time_unix_ms,
+        args.end_time_unix_ms,
+        options,
+    )?;
+    store.upsert_sleep_reading(&reading)?;
+    serde_json::to_value(&reading).map_err(|error| GooseError::message(error.to_string()))
+}
+
+fn sleep_get_reading_bridge(args: SleepGetReadingArgs) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let reading = store.sleep_reading_for_session(&args.session_id)?;
+    serde_json::to_value(reading).map_err(|error| GooseError::message(error.to_string()))
 }
 
 fn swift_caches_list_sleep_audio_events_bridge(

@@ -202,7 +202,11 @@ struct WhoopHomeView: View {
   private func dateChip(for day: Date) -> some View {
     let isoString = client.isoDate(day)
     let recoveryScore = client.recoveryScore(forISODate: isoString)
+    // hasWorkout falls back to local CompletedWorkoutStore when the server's
+    // calendar misses a date (most often: previous months, or today before
+    // the server has processed it).
     let hasWorkout = client.hasWorkout(onISODate: isoString)
+      || !CompletedWorkoutStore.shared.workouts(onISODate: isoString).isEmpty
     let isSelected = Calendar.current.isDate(day, inSameDayAs: client.currentDate)
     let isToday = Calendar.current.isDateInToday(day)
 

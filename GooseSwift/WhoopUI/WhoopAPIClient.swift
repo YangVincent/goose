@@ -220,7 +220,12 @@ final class WhoopAPIClient: ObservableObject {
   }
 
   func recoveryScore(forISODate isoDate: String) -> Double? {
-    calendar?.dates.first { $0.date == isoDate }?.recovery_score
+    // Calendar covers only the current month. Fall back to recoveryHistory
+    // (multi-month) so previous months' chips still get the colored dot.
+    if let score = calendar?.dates.first(where: { $0.date == isoDate })?.recovery_score {
+      return score
+    }
+    return recoveryHistory.first { ($0.start ?? "").hasPrefix(isoDate) }?.recovery_score
   }
 
   func hasWorkout(onISODate isoDate: String) -> Bool {

@@ -68,6 +68,7 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
+			F100000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift */; };
 			F100000000000000000000D2 /* WhoopUI/CollapsibleSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */; };
 			F100000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */; };
 			F100000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */; };
@@ -260,6 +261,7 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopActivityImporter.swift; sourceTree = "<group>"; };
 			F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/CollapsibleSection.swift; sourceTree = "<group>"; };
 			F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopTodayActivitiesCard.swift; sourceTree = "<group>"; };
 			F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopHeroDualRing.swift; sourceTree = "<group>"; };
@@ -576,6 +578,7 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
+				F200000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift */,
 				F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */,
 				F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */,
 				F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */,
@@ -931,6 +934,7 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
+				F100000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift in Sources */,
 				F100000000000000000000D2 /* WhoopUI/CollapsibleSection.swift in Sources */,
 				F100000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift in Sources */,
 				F100000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift in Sources */,

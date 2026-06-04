@@ -43,25 +43,27 @@ struct WhoopTodayActivitiesCard: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
 
-      NavigationLink {
-        LiveActivityView()
-      } label: {
-        HStack(spacing: 8) {
-          Image(systemName: "play.fill")
-            .font(.system(size: 12, weight: .heavy))
-          Text("START ACTIVITY")
-            .font(.system(size: 11, weight: .heavy, design: .rounded))
-            .tracking(1.5)
+      if Calendar.current.isDateInToday(client.currentDate) {
+        NavigationLink {
+          LiveActivityView()
+        } label: {
+          HStack(spacing: 8) {
+            Image(systemName: "play.fill")
+              .font(.system(size: 12, weight: .heavy))
+            Text("START ACTIVITY")
+              .font(.system(size: 11, weight: .heavy, design: .rounded))
+              .tracking(1.5)
+          }
+          .foregroundStyle(.black)
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 10)
+          .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+              .fill(Color.white.opacity(0.95))
+          )
         }
-        .foregroundStyle(.black)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(
-          RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color.white.opacity(0.95))
-        )
+        .buttonStyle(.plain)
       }
-      .buttonStyle(.plain)
     }
     .padding(14)
     .background(
@@ -151,8 +153,14 @@ struct WhoopTodayActivitiesCard: View {
   // MARK: - Workout row
 
   private var todaysWorkouts: [CompletedWorkout] {
-    let dayStart = Calendar.current.startOfDay(for: Date())
-    return workoutStore.workouts.filter { $0.startedAt >= dayStart }
+    // Filter against the *selected* date in the date strip, not always
+    // today — so tapping a previous day surfaces that day's workouts.
+    let calendar = Calendar.current
+    let dayStart = calendar.startOfDay(for: client.currentDate)
+    let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+    return workoutStore.workouts.filter {
+      $0.startedAt >= dayStart && $0.startedAt < dayEnd
+    }
   }
 
   private func workoutRow(_ workout: CompletedWorkout) -> some View {

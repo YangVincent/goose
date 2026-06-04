@@ -108,17 +108,38 @@ extension GooseAppModel {
     }
   }
 
-  func enterActivityHighFrequencyHistorySyncIfNeeded(activity: ActivityKind) {
-    guard !ble.highFrequencyHistorySyncActive else {
-      activityRequestedHighFrequencyHistorySync = false
-      ble.record(
-        source: "activity.high_frequency_sync",
-        title: "enter.skipped",
-        body: "already active for \(activity.title)"
-      )
-      return
+  /// Wire `SleepSessionStore` start/end notifications to the BLE client's
+  /// HIGH_FREQ_SYNC refcount. As long as a sleep session is active, the
+  /// "sleep" context holds HF open and the PROMPT-renewal handler keeps
+  /// the strap streaming K12/K24 packets across the entire night. The
+  /// refcount is held unconditionally; if the strap isn't writable at
+  /// the moment, the connection-ready auto-arm picks it up when the
+  /// transport recovers.
+  func bindSleepSessionToHighFrequencySync() {
+    NotificationCenter.default.addObserver(
+      forName: SleepSessionStore.sessionStartedNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] note in
+      guard let self else { return }
+      let restored = (note.userInfo?["restored"] as? Bool) ?? false
+      let started = note.userInfo?["startedAt"] as? Date
+      let reason = restored ? "sleep_session_restored" : "sleep_session_started"
+      let body = started.map { "\(reason) at \($0)" } ?? reason
+      ble.record(source: "sleep.high_frequency_sync", title: reason, body: body)
+      ble.acquireHighFrequencyHistorySync(context: "sleep", reason: reason)
     }
+    NotificationCenter.default.addObserver(
+      forName: SleepSessionStore.sessionEndedNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      ble.releaseHighFrequencyHistorySync(context: "sleep", reason: "sleep_session_ended")
+    }
+  }
 
+  func enterActivityHighFrequencyHistorySyncIfNeeded(activity: ActivityKind) {
     guard ble.canWriteHighFrequencyHistorySync else {
       activityRequestedHighFrequencyHistorySync = false
       ble.record(
@@ -131,12 +152,7 @@ extension GooseAppModel {
     }
 
     activityRequestedHighFrequencyHistorySync = true
-    ble.record(
-      source: "activity.high_frequency_sync",
-      title: "enter.requested",
-      body: activity.title
-    )
-    ble.enterHighFrequencyHistorySync()
+    ble.acquireHighFrequencyHistorySync(context: "activity", reason: activity.title)
   }
 
   func exitActivityHighFrequencyHistorySyncIfNeeded(reason: String) {
@@ -145,22 +161,7 @@ extension GooseAppModel {
     }
 
     activityRequestedHighFrequencyHistorySync = false
-    guard ble.canWriteHighFrequencyHistorySync else {
-      ble.record(
-        level: .warn,
-        source: "activity.high_frequency_sync",
-        title: "exit.blocked",
-        body: "\(reason) | \(ble.highFrequencyHistorySyncDisplaySummary)"
-      )
-      return
-    }
-
-    ble.record(
-      source: "activity.high_frequency_sync",
-      title: "exit.requested",
-      body: reason
-    )
-    ble.exitHighFrequencyHistorySync()
+    ble.releaseHighFrequencyHistorySync(context: "activity", reason: reason)
   }
 
   /// Uniformly sample a long location track down to roughly `maxPoints`.

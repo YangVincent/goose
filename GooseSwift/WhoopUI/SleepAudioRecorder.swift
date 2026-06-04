@@ -50,9 +50,10 @@ final class SleepAudioRecorder: ObservableObject {
   @Published private(set) var rollingBaselineDB: Double = -60
   @Published private(set) var recentEvents: [SleepAudioEvent] = []
 
-  @AppStorage("goose.swift.sleepAudio.enabled") var isEnabled: Bool = false
+  // Audio recording is now tied 1:1 with sleep sessions (Start Sleep arms,
+  // End Sleep disarms). No separate enable toggle and no charging gate --
+  // if the user marks themselves as asleep, we listen for events.
   @AppStorage("goose.swift.sleepAudio.retentionDays") var retentionDays: Int = 7
-  @AppStorage("goose.swift.sleepAudio.chargingOnly") var chargingOnly: Bool = true
 
   private let engine = AVAudioEngine()
   private var eventRecorder: AVAudioRecorder?
@@ -66,10 +67,10 @@ final class SleepAudioRecorder: ObservableObject {
     return dir
   }()
 
-  /// Begin listening. Called by SleepWindowDetector when the user falls
-  /// asleep, or manually via the toggle.
+  /// Begin listening. Called by SleepSessionStore.startSleep when the user
+  /// taps "Start Sleep". Audio recording is now always-on for the duration
+  /// of a sleep session -- no separate enable toggle, no charging gate.
   func arm() {
-    guard isEnabled else { return }
     guard state == .idle else { return }
     requestPermissionAndStart()
   }

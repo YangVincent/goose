@@ -108,9 +108,11 @@ extension GooseBLEClient {
       //   1. startPhysiologyCapture: opens REALTIME_HR + R10/R11 + IMU +
       //      OPTICAL_DATA + OPTICAL_MODE + R20/R21 persistent streams.
       //      Required for K17 (R17 optical samples) to flow.
-      //   2. HIGH_FREQ_SYNC: unlocks K12/K24 raw_sensor_history packets
-      //      (full DSP channels). Auto-disables every ~2h; case 98
-      //      re-arms.
+      //   2. HIGH_FREQ_SYNC: only re-engaged on reconnect if some
+      //      consumer (workout, sleep, manual) is already holding it
+      //      open via the contexts refcount. We used to unconditionally
+      //      enter HF on every ready transition, which burned battery
+      //      when nobody was reading the K12/K24 stream.
       if value == "ready" {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
           guard let self, self.connectionState == "ready" else { return }
@@ -120,14 +122,16 @@ extension GooseBLEClient {
           )
           self.startPhysiologySignalCapture()
         }
-        if !highFrequencyHistorySyncActive {
+        if !highFrequencyHistorySyncActive && !highFrequencyHistorySyncContexts.isEmpty {
           DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self,
                   self.connectionState == "ready",
-                  !self.highFrequencyHistorySyncActive else { return }
+                  !self.highFrequencyHistorySyncActive,
+                  !self.highFrequencyHistorySyncContexts.isEmpty else { return }
             self.record(
               source: "ble.high_frequency_sync",
-              title: "auto_arm.connection_ready"
+              title: "auto_arm.connection_ready",
+              body: "contexts=[\(self.highFrequencyHistorySyncContexts.sorted().joined(separator: ","))]"
             )
             self.enterHighFrequencyHistorySync()
           }

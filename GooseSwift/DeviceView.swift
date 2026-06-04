@@ -478,11 +478,14 @@ private struct DeviceActionGrid: View {
       }
       .disabled(!ble.canSyncHistorical)
 
-      DeviceActionButton(title: ble.highFrequencyHistorySyncActive ? "Exit HF" : "High Freq", systemName: "bolt.horizontal") {
-        if ble.highFrequencyHistorySyncActive {
-          ble.exitHighFrequencyHistorySync()
+      DeviceActionButton(title: ble.highFrequencyHistorySyncContexts.contains("manual") ? "Exit HF" : "High Freq", systemName: "bolt.horizontal") {
+        // The manual button uses the same refcount mechanism as workouts
+        // and sleep so the PROMPT-renewal loop keeps the stream alive
+        // until you tap again to release.
+        if ble.highFrequencyHistorySyncContexts.contains("manual") {
+          ble.releaseHighFrequencyHistorySync(context: "manual", reason: "device_view_button")
         } else {
-          ble.enterHighFrequencyHistorySync()
+          ble.acquireHighFrequencyHistorySync(context: "manual", reason: "device_view_button")
         }
       }
       .disabled(!ble.canWriteHighFrequencyHistorySync)

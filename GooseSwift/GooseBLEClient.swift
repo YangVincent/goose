@@ -56,6 +56,12 @@ final class GooseBLEClient: NSObject, ObservableObject {
   @Published var highFrequencyHistorySyncExpiresAt: Date?
   @Published var lastHighFrequencyHistorySyncResponse = "No high-frequency sync response yet"
   @Published var lastHighFrequencyHistorySyncEvent = "No high-frequency sync event yet"
+  /// Ref-counted set of consumers that want HIGH_FREQ_SYNC to stay on
+  /// (e.g. "activity:run-1234", "sleep"). When the strap sends
+  /// HIGH_FREQ_SYNC_PROMPT (event id 96) every ~3 minutes, the
+  /// handler renews the session if this set is non-empty -- otherwise
+  /// the strap times out the session and we lose K12/K24 packets.
+  @Published var highFrequencyHistorySyncContexts: Set<String> = []
   @Published var strapClockDate: Date?
   @Published var strapClockOffsetSeconds: TimeInterval?
   @Published var strapClockUpdatedAt: Date?

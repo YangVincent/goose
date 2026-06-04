@@ -38,7 +38,9 @@ final class SleepSessionStore: ObservableObject {
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
   }
 
-  @Published private(set) var active: ActiveSession?
+  @Published private(set) var active: ActiveSession? {
+    didSet { Self.persistActive(active, key: activeStorageKey) }
+  }
   @Published private(set) var detectionLog: [DetectionSample] = []
   @Published private(set) var pastSessions: [PastSession] = []
 
@@ -49,23 +51,61 @@ final class SleepSessionStore: ObservableObject {
   // detection accuracy over time. Not a primary data store — that's the
   // sleep window detector + SQLite. This is just the comparison log.
   private let storageKey = "goose.swift.sleepSession.history.v1"
+  // Persist the live "Start Sleep" tap separately so it survives process
+  // death (iOS will reclaim background apps overnight; without this an
+  // 8-hour session disappears the moment the OS kills us).
+  private let activeStorageKey = "goose.swift.sleepSession.active.v1"
+  /// How long we'll trust a restored active session. If the persisted
+  /// startedAt is older than this, treat it as stale (user forgot to tap
+  /// End or the app crashed days ago) and discard.
+  private let maxActiveAge: TimeInterval = 16 * 3600
+
+  /// Posted whenever a sleep session begins (manual tap or cold-launch
+  /// restore). Carried in `userInfo["startedAt"]`. Observed by
+  /// `GooseAppModel` so it can acquire HIGH_FREQ_SYNC for the duration.
+  static let sessionStartedNotification = Notification.Name("goose.sleep.session.started")
+  /// Posted on End Sleep, or when a stale restore is discarded.
+  static let sessionEndedNotification = Notification.Name("goose.sleep.session.ended")
 
   init() {
     pastSessions = Self.loadPersisted(key: storageKey)
+    if let restored = Self.loadActive(key: activeStorageKey),
+       Date().timeIntervalSince(restored.startedAt) < maxActiveAge {
+      active = restored
+      // Re-arm audio and the per-minute evaluator on cold launch so the
+      // session keeps working after the OS killed and re-spawned us.
+      SleepAudioRecorder.shared.arm()
+      scheduleEvaluator()
+      recordDetectionSample()
+      NotificationCenter.default.post(
+        name: Self.sessionStartedNotification,
+        object: nil,
+        userInfo: ["startedAt": restored.startedAt, "restored": true]
+      )
+    } else if Self.loadActive(key: activeStorageKey) != nil {
+      // Stale ghost from a previous run -- discard.
+      Self.persistActive(nil, key: activeStorageKey)
+    }
   }
 
-  /// User taps "Start Sleep" — record start time, arm audio recorder if
-  /// enabled, kick off the 1-min detection timer.
+  /// User taps "Start Sleep" — record start time, arm the audio recorder,
+  /// and kick off the 1-min detection timer. Audio is on for the full
+  /// session by design; the range between startedAt and endedAt is what
+  /// downstream sleep analysis runs against.
   func startSleep() {
     guard active == nil else { return }
-    active = ActiveSession(startedAt: Date())
+    let session = ActiveSession(startedAt: Date())
+    active = session
     detectionLog = []
-    if SleepAudioRecorder.shared.isEnabled {
-      SleepAudioRecorder.shared.arm()
-    }
+    SleepAudioRecorder.shared.arm()
     scheduleEvaluator()
     // Record one sample immediately so the log starts populated.
     recordDetectionSample()
+    NotificationCenter.default.post(
+      name: Self.sessionStartedNotification,
+      object: nil,
+      userInfo: ["startedAt": session.startedAt, "restored": false]
+    )
   }
 
   /// User taps "End Sleep" — store the session + log, disarm recorder,
@@ -90,6 +130,11 @@ final class SleepSessionStore: ObservableObject {
     if pastSessions.count > 30 { pastSessions = Array(pastSessions.prefix(30)) }
     Self.persist(pastSessions, key: storageKey)
     active = nil
+    NotificationCenter.default.post(
+      name: Self.sessionEndedNotification,
+      object: nil,
+      userInfo: ["endedAt": now]
+    )
   }
 
   // MARK: - Evaluator
@@ -157,6 +202,28 @@ final class SleepSessionStore: ObservableObject {
       UserDefaults.standard.set(data, forKey: key)
     }
   }
+
+  private static func loadActive(key: String) -> ActiveSession? {
+    guard let data = UserDefaults.standard.data(forKey: key),
+          let decoded = try? JSONDecoder().decode(PersistedActiveSession.self, from: data)
+    else { return nil }
+    return ActiveSession(startedAt: decoded.startedAt)
+  }
+
+  private static func persistActive(_ session: ActiveSession?, key: String) {
+    if let session {
+      let encodable = PersistedActiveSession(startedAt: session.startedAt)
+      if let data = try? JSONEncoder().encode(encodable) {
+        UserDefaults.standard.set(data, forKey: key)
+      }
+    } else {
+      UserDefaults.standard.removeObject(forKey: key)
+    }
+  }
+}
+
+private struct PersistedActiveSession: Codable {
+  let startedAt: Date
 }
 
 /// Codable mirror of PastSession for UserDefaults persistence. PastSession

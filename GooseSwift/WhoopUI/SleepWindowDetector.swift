@@ -156,8 +156,15 @@ final class SleepWindowStore: ObservableObject {
   /// Auto-arm the sleep audio recorder if the user looks currently asleep
   /// (recent ~30min HR mean within +5bpm of resting). Disarm if recent HR
   /// is clearly elevated.
+  ///
+  /// **Hands off whenever a manual SleepSessionStore session is active.**
+  /// The user's explicit Start Sleep / End Sleep taps are ground truth;
+  /// auto-detection must not pull the rug on them. Earlier versions of
+  /// this code called recorder.disarm() unconditionally on an HR spike,
+  /// which silently killed audio mid-session whenever the user turned
+  /// over or briefly woke.
   private func autoArmIfAsleep(samples: [HeartRateSamplePoint], resting: Double) {
-    guard SleepAudioRecorder.shared.isEnabled else { return }
+    guard SleepSessionStore.shared.active == nil else { return }
     let cutoff = Date().addingTimeInterval(-30 * 60)
     let recent = samples.filter { $0.capturedAt >= cutoff }
     guard recent.count >= 5 else { return }

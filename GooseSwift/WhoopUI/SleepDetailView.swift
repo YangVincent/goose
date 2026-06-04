@@ -708,30 +708,15 @@ struct SleepDetailView: View {
     }
   }
 
-  // MARK: - Sleep audio (off by default, ties to sleep session)
+  // MARK: - Sleep audio (always on for the duration of a sleep session)
 
   private var sleepAudioCard: some View {
     cardSurface {
       VStack(alignment: .leading, spacing: 8) {
-        HStack {
-          Text("SLEEP AUDIO")
-            .font(.system(size: 10, weight: .heavy, design: .rounded))
-            .tracking(2)
-            .foregroundStyle(.white.opacity(0.55))
-          Spacer()
-          Toggle("", isOn: $audioRecorder.isEnabled)
-            .labelsHidden()
-            .tint(Self.hrvAccent)
-            .onChange(of: audioRecorder.isEnabled) { _, newValue in
-              // Only arm immediately if a sleep session is already active.
-              // Otherwise audio waits for "Start Sleep".
-              if newValue, sleepSession.active != nil {
-                audioRecorder.arm()
-              } else if !newValue {
-                audioRecorder.disarm()
-              }
-            }
-        }
+        Text("SLEEP AUDIO")
+          .font(.system(size: 10, weight: .heavy, design: .rounded))
+          .tracking(2)
+          .foregroundStyle(.white.opacity(0.55))
         Text(audioStatusText)
           .font(.system(size: 11, weight: .semibold, design: .rounded))
           .foregroundStyle(audioStatusColor)
@@ -745,7 +730,7 @@ struct SleepDetailView: View {
             Spacer(minLength: 0)
           }
         }
-        Text("Tap **Start Sleep** on the home page to begin a session. Audio records only while a session is active and only events (>+12dB above baseline) are saved. Clips auto-prune after \(audioRecorder.retentionDays) days.")
+        Text("Audio listens for the entire duration of a sleep session. Only events (>+12dB above baseline) are saved as 30s clips. Clips auto-prune after \(audioRecorder.retentionDays) days.")
           .font(.system(size: 9, weight: .semibold, design: .rounded))
           .foregroundStyle(.white.opacity(0.4))
           .fixedSize(horizontal: false, vertical: true)
@@ -853,7 +838,7 @@ struct SleepDetailView: View {
 
   private var audioStatusText: String {
     switch audioRecorder.state {
-    case .idle: return audioRecorder.isEnabled ? "Idle — armed when you fall asleep." : "Disabled."
+    case .idle: return "Idle — listens whenever a sleep session is active."
     case .armed: return "Listening · baseline \(Int(audioRecorder.rollingBaselineDB)) dB"
     case .recordingEvent: return "Recording event · peak \(Int(audioRecorder.maxAmbientDB)) dB"
     case .error(let msg): return "Error: \(msg)"

@@ -290,12 +290,26 @@ extension GooseBLEClient {
       lastAlarmEventSummary = "HAPTICS_FIRED"
       record(source: "ble.alarm", title: "alarm.event", body: "HAPTICS_FIRED")
     case 96:
+      // The strap sends HIGH_FREQ_SYNC_PROMPT every ~3 minutes asking
+      // "should I keep this session alive?" If any consumer is holding
+      // HF open via the contexts refcount (workout, sleep, manual), we
+      // renew immediately; otherwise we let the session die so the strap
+      // doesn't waste battery streaming K12/K24 nobody's reading.
       lastHighFrequencyHistorySyncEvent = "HIGH_FREQ_SYNC_PROMPT"
+      let wantedBy = highFrequencyHistorySyncContexts.sorted().joined(separator: ",")
       record(
         source: "ble.high_frequency_sync",
         title: "event",
-        body: "\(lastHighFrequencyHistorySyncEvent) body=\(Data(eventBody).hexString) payload=\(Data(payload).hexString)"
+        body: "HIGH_FREQ_SYNC_PROMPT contexts=[\(wantedBy)] body=\(Data(eventBody).hexString) payload=\(Data(payload).hexString)"
       )
+      if !highFrequencyHistorySyncContexts.isEmpty && canWriteHighFrequencyHistorySync {
+        record(
+          source: "ble.high_frequency_sync",
+          title: "renew.on_prompt",
+          body: "contexts=[\(wantedBy)]"
+        )
+        enterHighFrequencyHistorySync()
+      }
     case 97:
       highFrequencyHistorySyncActive = true
       if highFrequencyHistorySyncExpiresAt == nil {
@@ -319,17 +333,20 @@ extension GooseBLEClient {
         title: "event",
         body: "\(lastHighFrequencyHistorySyncEvent) body=\(Data(eventBody).hexString) payload=\(Data(payload).hexString)"
       )
-      // The strap auto-disables HIGH_FREQ_SYNC every ~2 hours. Immediately
-      // re-arm so K12/K24 raw_sensor_history packets keep flowing (PPG,
-      // SpO2 ADC, skin_contact, signal_quality, full RR series). The 3s
-      // delay gives the firmware a beat between sessions.
+      // The strap auto-disables HIGH_FREQ_SYNC every ~2 hours. With the
+      // PROMPT-renewal path in place (case 96) this rarely fires anymore,
+      // but it's a fallback for clock drift / missed prompts: if any
+      // consumer is still holding HF open, re-arm. If contexts is empty
+      // it means everyone already let go and the strap is correctly off.
       DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
         guard let self,
               self.connectionState == "ready",
-              !self.highFrequencyHistorySyncActive else { return }
+              !self.highFrequencyHistorySyncActive,
+              !self.highFrequencyHistorySyncContexts.isEmpty else { return }
         self.record(
           source: "ble.high_frequency_sync",
-          title: "auto_arm.after_disabled"
+          title: "auto_arm.after_disabled",
+          body: "contexts=[\(self.highFrequencyHistorySyncContexts.sorted().joined(separator: ","))]"
         )
         self.enterHighFrequencyHistorySync()
       }

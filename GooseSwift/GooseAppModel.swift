@@ -407,6 +407,7 @@ final class GooseAppModel: ObservableObject {
     prepareClientHello()
     cleanupOrphanedActivityCaptureSessions()
     refreshActivityTimeline()
+    bindSleepSessionToHighFrequencySync()
     scheduleAutoStartHealthPacketCaptureIfNeeded()
     scheduleAutoStartRespiratoryPacketWatchIfNeeded()
     recoverUncleanOvernightGuardSessionIfNeeded()

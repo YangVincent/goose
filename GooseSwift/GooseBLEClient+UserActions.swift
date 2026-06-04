@@ -342,6 +342,37 @@ extension GooseBLEClient {
     )
   }
 
+  /// Refcount entry for a consumer (workout, sleep, debug toggle) that wants
+  /// HIGH_FREQ_SYNC to stay on. Sends ENTER on the first acquisition. The
+  /// PROMPT event handler renews automatically while contexts is non-empty,
+  /// so the 2-hour strap-side timeout no longer drops K12/K24.
+  func acquireHighFrequencyHistorySync(context: String, reason: String? = nil) {
+    let wasEmpty = highFrequencyHistorySyncContexts.isEmpty
+    highFrequencyHistorySyncContexts.insert(context)
+    record(
+      source: "ble.high_frequency_sync",
+      title: "acquire",
+      body: "context=\(context)\(reason.map { " reason=\($0)" } ?? "") active_contexts=\(highFrequencyHistorySyncContexts.count)"
+    )
+    if wasEmpty || !highFrequencyHistorySyncActive {
+      enterHighFrequencyHistorySync()
+    }
+  }
+
+  /// Refcount release. Sends EXIT only when the last consumer lets go so a
+  /// workout ending mid-sleep doesn't terminate sleep's HF stream.
+  func releaseHighFrequencyHistorySync(context: String, reason: String? = nil) {
+    let removed = highFrequencyHistorySyncContexts.remove(context) != nil
+    record(
+      source: "ble.high_frequency_sync",
+      title: "release",
+      body: "context=\(context)\(reason.map { " reason=\($0)" } ?? "") removed=\(removed) remaining=\(highFrequencyHistorySyncContexts.count)"
+    )
+    if highFrequencyHistorySyncContexts.isEmpty && highFrequencyHistorySyncActive {
+      exitHighFrequencyHistorySync()
+    }
+  }
+
   func queryWhoopAlarm(alarmID: Int = 1) {
     record(source: "ui.alarm", title: "alarm.query.requested", body: "alarmID=\(alarmID)")
     guard let alarmID = validatedAlarmID(alarmID) else {

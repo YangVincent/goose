@@ -279,10 +279,12 @@ struct MoreDebugView: View {
           status: model.ble.canWriteHighFrequencyHistorySync ? .pending : .blocked,
           disabled: !model.ble.canWriteHighFrequencyHistorySync
         ) {
-          if model.ble.highFrequencyHistorySyncActive {
-            model.exitHighFrequencyHistorySync()
+          // Mirror the DeviceView button: use the refcount mechanism so
+          // PROMPT renewal keeps HF alive across the 2h strap timeout.
+          if model.ble.highFrequencyHistorySyncContexts.contains("debug") {
+            model.ble.releaseHighFrequencyHistorySync(context: "debug", reason: "more_debug_button")
           } else {
-            model.enterHighFrequencyHistorySync()
+            model.ble.acquireHighFrequencyHistorySync(context: "debug", reason: "more_debug_button")
           }
         }
       }

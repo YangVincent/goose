@@ -1060,9 +1060,15 @@ fn parser_runner_validates_indexed_frame_fixture_expectations() {
         Some("HISTORICAL_DATA")
     );
 
-    for (fixture_id, marker_value) in [
-        ("owned.live_identity.k24_normal_history_payload", 151),
-        ("owned.history_complete.k24_normal_history_payload", 51),
+    // K24 packets carry the full DSP sensor channel set, so the parser
+    // now classifies them as raw_sensor_history (not the older
+    // normal_history bucket, which is reserved for K7/K9/K18 with just
+    // an HR marker). The HR-marker byte stays at offset 17 but is
+    // surfaced via SensorData / RawSensorHistory fields instead of the
+    // NormalHistory marker_value field.
+    for fixture_id in [
+        "owned.live_identity.k24_normal_history_payload",
+        "owned.history_complete.k24_normal_history_payload",
     ] {
         let owned_history = report
             .fixtures
@@ -1084,12 +1090,9 @@ fn parser_runner_validates_indexed_frame_fixture_expectations() {
             serde_json::to_value(&owned_history.parsed.as_ref().unwrap().parsed_payload).unwrap();
         assert_eq!(
             owned_history_payload["body_summary"]["kind"],
-            "normal_history"
+            "raw_sensor_history"
         );
-        assert_eq!(
-            owned_history_payload["body_summary"]["marker_value"],
-            marker_value
-        );
+        assert_eq!(owned_history_payload["packet_k"], 24);
     }
 
     for (fixture_id, expected_summary_kind) in [
@@ -1533,4 +1536,87 @@ struct HistoricalSyncCommandValidationRow {
     validated_provenance_json: Option<String>,
     validated_triggering_ui_action: Option<String>,
     report_json: serde_json::Value,
+}
+
+/// One-shot regenerator for stale fixture sidecars. Parser drift (K12/K24
+/// split off into RawSensorHistory; NormalHistory + I16SeriesSummary gained
+/// new fields) left a handful of `.fixture.json` files asserting old
+/// parser output. Run with:
+///
+///     PATH=$HOME/.cargo/bin:$PATH cargo test --test fixture_tests \
+///         regenerate_stale_fixture_expectations -- --ignored --nocapture
+///
+/// After running, re-run goose-fixture-index to refresh fixtures/index.json:
+///
+///     PATH=$HOME/.cargo/bin:$PATH cargo run --bin goose-fixture-index -- \
+///         --fixtures fixtures --output fixtures/index.json
+#[test]
+#[ignore]
+fn regenerate_stale_fixture_expectations() {
+    use goose_core::protocol::{
+        DeviceType, build_v5_payload_frame, decode_hex_with_whitespace, parse_frame,
+    };
+
+    let root = Path::new("fixtures");
+    let stale = [
+        "owned/history_complete_k24_normal_history_payload.fixture.json",
+        "owned/live_identity_k24_normal_history_payload.fixture.json",
+        "synthetic/goose_v5_k10_motion_summary_short.fixture.json",
+        "synthetic/goose_v5_k21_motion_summary_short.fixture.json",
+    ];
+
+    for relative in stale {
+        let sidecar_path = root.join(relative);
+        let sidecar_raw = fs::read_to_string(&sidecar_path).unwrap();
+        let mut sidecar: serde_json::Value = serde_json::from_str(&sidecar_raw).unwrap();
+        let payload_path = root.join(sidecar["path"].as_str().unwrap());
+        let payload_hex = fs::read_to_string(&payload_path).unwrap();
+        let raw_bytes = decode_hex_with_whitespace(&payload_hex).unwrap();
+        // goose.frame.hex.v1 stores a fully-framed packet (0xaa...) so it
+        // can be parsed as-is. goose.payload.hex.v1 stores just the inner
+        // payload, which still needs the v5 header/CRC wrapping before
+        // parse_frame can read it.
+        let schema = sidecar["schema"].as_str().unwrap();
+        let frame_bytes = match schema {
+            "goose.frame.hex.v1" => raw_bytes,
+            "goose.payload.hex.v1" => build_v5_payload_frame(&raw_bytes),
+            other => panic!("unsupported regenerator schema: {other}"),
+        };
+        let parsed = parse_frame(DeviceType::Goose, &frame_bytes).unwrap();
+        let parsed_payload_json = serde_json::to_value(&parsed.parsed_payload).unwrap();
+
+        let expected = sidecar
+            .get_mut("expected")
+            .and_then(|value| value.as_object_mut())
+            .unwrap();
+        expected.insert("parsed_payload".to_string(), parsed_payload_json);
+        expected.insert(
+            "packet_type".to_string(),
+            serde_json::json!(parsed.packet_type.unwrap_or(0)),
+        );
+        expected.insert(
+            "packet_type_name".to_string(),
+            serde_json::json!(parsed.packet_type_name),
+        );
+        expected.insert(
+            "sequence".to_string(),
+            serde_json::json!(parsed.sequence.unwrap_or(0)),
+        );
+        expected.insert(
+            "command_or_event".to_string(),
+            serde_json::json!(parsed.command_or_event.unwrap_or(0)),
+        );
+        expected.insert(
+            "header_crc_valid".to_string(),
+            serde_json::json!(parsed.header_crc_valid),
+        );
+        expected.insert(
+            "payload_crc_valid".to_string(),
+            serde_json::json!(parsed.payload_crc_valid),
+        );
+
+        let pretty = serde_json::to_string_pretty(&sidecar).unwrap();
+        fs::write(&sidecar_path, format!("{pretty}\n")).unwrap();
+        eprintln!("refreshed {}", sidecar_path.display());
+    }
 }

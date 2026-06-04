@@ -643,7 +643,11 @@ fn exports_sqlite_timeframe_to_jsonl_csv_and_sqlite_bundle() {
     let metric_values = fs::read_to_string(export_dir.join("data/metric_values.jsonl")).unwrap();
     let metric_components =
         fs::read_to_string(export_dir.join("data/metric_components.jsonl")).unwrap();
-    assert!(decoded_frames.contains("raw_motion_k10"));
+    // parsed_payload_json is now empty in decoded_frames; the K10 family
+    // marker lives in the typed packet_family column. packet_timeline
+    // still carries the structured body_summary because the timeline
+    // builder re-parses payload_hex on the fly.
+    assert!(decoded_frames.contains("K10/raw_motion_stream_result"));
     assert!(packet_timeline.contains("body_summary"));
     assert!(sensor_samples.contains("normal_history_hr_marker"));
     assert!(sensor_samples.contains("r17_samples"));
@@ -3197,9 +3201,13 @@ fn raw_export_can_omit_raw_bytes_but_keep_hashes_and_decoded_samples() {
 
     let decoded_rows = read_jsonl_values(&export_dir.join("data/decoded_frames.jsonl"));
     assert_eq!(decoded_rows[0]["payload_hex"], "");
-    let parsed_payload: serde_json::Value =
-        serde_json::from_str(decoded_rows[0]["parsed_payload_json"].as_str().unwrap()).unwrap();
-    assert_no_non_empty_raw_byte_fields(&parsed_payload);
+    // parsed_payload_json column is gone (v19); the K10 family marker
+    // lives on the typed packet_family column instead, which doesn't carry
+    // raw bytes by construction.
+    assert_eq!(
+        decoded_rows[0]["packet_family"],
+        serde_json::Value::String("K10/raw_motion_stream_result".to_string())
+    );
 
     let timeline_rows = read_jsonl_values(&export_dir.join("data/packet_timeline.jsonl"));
     assert!(timeline_rows[0]["body_hex"].is_null());

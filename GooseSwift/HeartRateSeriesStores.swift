@@ -52,13 +52,6 @@ struct HeartRateRestingEstimate: Equatable {
   let source: String
 }
 
-/// Legacy on-disk shape — kept only because some debug exports reference it.
-/// New code goes through the SQLite-backed HeartRateSeriesStore directly.
-struct HeartRateSeriesFile: Codable {
-  let version: Int
-  let samples: [HeartRateSamplePoint]
-}
-
 final class HeartRateSeriesStore {
   static let shared = HeartRateSeriesStore()
   static let didUpdateNotification = Notification.Name("GooseHeartRateSeriesStoreDidUpdate")
@@ -76,10 +69,9 @@ final class HeartRateSeriesStore {
   init() {
     self.samples = Self.loadFromStore(bridge: GooseRustBridge())
     prune(relativeTo: Date())
-    // DO NOT delete legacy JSON. Earlier code did, and it dropped HR data
-    // that hadn't been imported into SQLite yet. The legacy importer below
-    // pulls any remaining samples into SQLite without touching the file.
-    Self.importLegacyJSONIntoStoreIfPresent()
+    // No legacy JSON importer -- SQLite is the source of truth and the
+    // heart-rate-samples.json sidecar has been retired. Old captures were
+    // already imported during the v0 -> SQLite migration.
     // No init-time decoded_frames recovery — that's a one-shot operation
     // exposed via a "Recover HR from decoded frames" button in More → Debug.
     // Going forward, `Store::insert_decoded_frame` mirrors HR into hr_samples
@@ -332,44 +324,6 @@ final class HeartRateSeriesStore {
     }
   }
 
-  /// Import any HR samples still living in the legacy `heart-rate-samples.json`
-  /// file into SQLite, *without* deleting the file. Idempotent — the SQLite
-  /// `INSERT OR IGNORE` keeps duplicates from accumulating, and the file is
-  /// kept on disk as a recoverable copy.
-  private static func importLegacyJSONIntoStoreIfPresent() {
-    let base = FileManager.default
-      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-      .first ?? FileManager.default.temporaryDirectory
-    let url = base
-      .appendingPathComponent("GooseSwift", isDirectory: true)
-      .appendingPathComponent("heart-rate-samples.json")
-    guard FileManager.default.fileExists(atPath: url.path),
-          let data = try? Data(contentsOf: url) else { return }
-    let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    let legacySamples: [HeartRateSamplePoint] = {
-      if let file = try? decoder.decode(HeartRateSeriesFile.self, from: data) {
-        return file.samples
-      }
-      return (try? decoder.decode([HeartRateSamplePoint].self, from: data)) ?? []
-    }()
-    guard !legacySamples.isEmpty else { return }
-    let bridge = GooseRustBridge()
-    let dbPath = HealthDataStore.defaultDatabasePath()
-    for sample in legacySamples {
-      _ = try? bridge.request(
-        method: "swift_caches.append_hr_sample",
-        args: [
-          "database_path": dbPath,
-          "sample_id": sample.id,
-          "captured_at_ms": Int64((sample.capturedAt.timeIntervalSince1970 * 1000).rounded()),
-          "bpm": sample.bpm,
-          "source": sample.source,
-        ]
-      )
-    }
-  }
-
   private func prune(relativeTo date: Date) {
     let cutoff = date.addingTimeInterval(-Self.retention)
     if let firstKept = samples.firstIndex(where: { $0.capturedAt >= cutoff }), firstKept > 0 {
@@ -417,11 +371,6 @@ struct HRVDailyEstimate: Equatable {
   let source: String
 }
 
-struct HRVSeriesFile: Codable {
-  let version: Int
-  let samples: [HRVSamplePoint]
-}
-
 final class HRVSeriesStore {
   static let shared = HRVSeriesStore()
   static let didUpdateNotification = Notification.Name("GooseHRVSeriesStoreDidUpdate")
@@ -444,7 +393,9 @@ final class HRVSeriesStore {
       persistToStore(migratedSample)
     }
     prune(relativeTo: Date())
-    Self.importLegacyJSONIntoStoreIfPresent()
+    // Legacy hrv-samples.json importer removed; SQLite is the source of
+    // truth and old captures were already imported during the v0 -> SQLite
+    // migration.
   }
 
   func append(rmssdMS: Double, rrIntervalCount: Int, source: String, capturedAt: Date) -> Bool {
@@ -577,43 +528,6 @@ final class HRVSeriesStore {
     }
   }
 
-  /// Import any HRV samples in the legacy `hrv-samples.json` into SQLite,
-  /// WITHOUT deleting the file. Safe to run on every launch — duplicates
-  /// are blocked by `INSERT OR IGNORE` on the SQLite side.
-  private static func importLegacyJSONIntoStoreIfPresent() {
-    let base = FileManager.default
-      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-      .first ?? FileManager.default.temporaryDirectory
-    let url = base
-      .appendingPathComponent("GooseSwift", isDirectory: true)
-      .appendingPathComponent("hrv-samples.json")
-    guard FileManager.default.fileExists(atPath: url.path),
-          let data = try? Data(contentsOf: url) else { return }
-    let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    let legacy: [HRVSamplePoint] = {
-      if let file = try? decoder.decode(HRVSeriesFile.self, from: data) {
-        return file.samples
-      }
-      return (try? decoder.decode([HRVSamplePoint].self, from: data)) ?? []
-    }()
-    guard !legacy.isEmpty else { return }
-    let bridge = GooseRustBridge()
-    let dbPath = HealthDataStore.defaultDatabasePath()
-    for sample in legacy {
-      _ = try? bridge.request(
-        method: "swift_caches.append_hrv_sample",
-        args: [
-          "database_path": dbPath,
-          "sample_id": sample.id,
-          "captured_at_ms": Int64((sample.capturedAt.timeIntervalSince1970 * 1000).rounded()),
-          "rmssd_ms": sample.rmssdMS,
-          "rr_interval_count": sample.rrIntervalCount,
-          "source": sample.source,
-        ]
-      )
-    }
-  }
 
   private static func loadPersistedLiveSample() -> HRVSamplePoint? {
     let defaults = UserDefaults.standard

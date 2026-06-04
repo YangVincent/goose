@@ -403,9 +403,15 @@ pub fn run_step_capture_validation(
 }
 
 fn parsed_payload_json(row: &DecodedFrameRow) -> GooseResult<Value> {
-    serde_json::from_str(&row.parsed_payload_json).map_err(|error| {
+    // step_discovery walks the full ParsedPayload as free-form JSON
+    // looking for candidate step-counter byte ranges the parser hasn't
+    // explicitly decoded yet. We re-parse the canonical payload_hex
+    // bytes and serialize the ParsedPayload to a Value in memory --
+    // no JSON column read, no canonical JSON storage.
+    let parsed = crate::protocol::parsed_payload_from_payload_hex(&row.payload_hex, &row.frame_id)?;
+    serde_json::to_value(&parsed).map_err(|error| {
         GooseError::message(format!(
-            "frame {} has invalid parsed_payload_json: {error}",
+            "frame {} cannot serialize re-parsed payload: {error}",
             row.frame_id
         ))
     })
@@ -442,6 +448,16 @@ fn packet_family(
     domain: Option<&str>,
     body_summary_kind: Option<&str>,
 ) -> String {
+    // Prefer the column populated at insert time -- the same value the rest
+    // of the system groups by. Fall back to deriving from the re-parsed
+    // payload only for legacy rows where packet_family is NULL.
+    if let Some(family) = row
+        .packet_family
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return family.to_string();
+    }
     if let Some(packet_k) = packet_k {
         if let Some(domain) = domain.filter(|value| !value.trim().is_empty()) {
             return format!("K{packet_k}/{domain}");
@@ -464,6 +480,13 @@ fn is_step_discovery_frame(
     context: &FrameContext<'_>,
 ) -> bool {
     if matches!(context.packet_k, Some(10 | 11 | 21)) {
+        return true;
+    }
+    if let Some(family) = row.packet_family.as_deref()
+        && (family.starts_with("K10/")
+            || family.starts_with("K11/")
+            || family.starts_with("K21/"))
+    {
         return true;
     }
     let mut haystack = String::new();

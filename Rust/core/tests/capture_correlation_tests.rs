@@ -53,17 +53,36 @@ fn correlation_report_promotes_distinct_owned_history_and_motion_evidence() {
     assert!(k21_motion.blocker_reasons.is_empty());
     assert!(k21_motion.next_capture_actions.is_empty());
 
+    // K24 packets now flow into raw_sensor_history (richer DSP channel
+    // decode), so the two owned K24 fixtures show up here; the K18
+    // synthetic stays in normal_history on its own.
+    let raw_sensor_history = report
+        .summaries
+        .iter()
+        .find(|summary| summary.body_summary_kind == "raw_sensor_history")
+        .unwrap();
+    assert_eq!(raw_sensor_history.observation_count, 2);
+    assert_eq!(raw_sensor_history.owned_capture_count, 2);
+    assert_eq!(raw_sensor_history.synthetic_count, 0);
+    assert!(raw_sensor_history.trusted_metric_ready);
+    assert!(raw_sensor_history.blocker_reasons.is_empty());
+    assert!(raw_sensor_history.next_capture_actions.is_empty());
+
     let normal_history = report
         .summaries
         .iter()
         .find(|summary| summary.body_summary_kind == "normal_history")
         .unwrap();
-    assert_eq!(normal_history.observation_count, 3);
-    assert_eq!(normal_history.owned_capture_count, 2);
+    assert_eq!(normal_history.observation_count, 1);
+    assert_eq!(normal_history.owned_capture_count, 0);
     assert_eq!(normal_history.synthetic_count, 1);
-    assert!(normal_history.trusted_metric_ready);
-    assert!(normal_history.blocker_reasons.is_empty());
-    assert!(normal_history.next_capture_actions.is_empty());
+    assert!(!normal_history.trusted_metric_ready);
+    assert!(
+        normal_history
+            .blocker_reasons
+            .iter()
+            .any(|reason| reason == "owned_capture_count 0 below required 2")
+    );
 
     let temperature = report
         .summaries
@@ -102,7 +121,7 @@ fn correlation_report_promotes_distinct_owned_history_and_motion_evidence() {
         ])
     );
     assert_eq!(
-        owned_sources_for(&report, "normal_history"),
+        owned_sources_for(&report, "raw_sensor_history"),
         BTreeSet::from([
             "android_btsnoop_full_snoop_history_complete_20260528T1748Z".to_string(),
             "android_btsnoop_live_identity_check_20260528T2002Z".to_string(),
@@ -115,7 +134,7 @@ fn correlation_report_promotes_distinct_owned_history_and_motion_evidence() {
             .iter()
             .all(|action| action.scope != "raw_motion_k10"
                 && action.scope != "raw_motion_k21"
-                && action.scope != "normal_history"),
+                && action.scope != "raw_sensor_history"),
         "{:?}",
         report.next_capture_actions
     );
@@ -154,7 +173,7 @@ fn correlation_report_promotes_distinct_owned_history_and_motion_evidence() {
     }));
     assert!(report.observations.iter().any(|observation| {
         observation.evidence_id == "owned.live_identity.k24_normal_history_payload"
-            && observation.body_summary_kind == "normal_history"
+            && observation.body_summary_kind == "raw_sensor_history"
             && observation.owned_capture
     }));
     assert!(report.observations.iter().any(|observation| {
@@ -169,7 +188,7 @@ fn correlation_report_promotes_distinct_owned_history_and_motion_evidence() {
     }));
     assert!(report.observations.iter().any(|observation| {
         observation.evidence_id == "owned.history_complete.k24_normal_history_payload"
-            && observation.body_summary_kind == "normal_history"
+            && observation.body_summary_kind == "raw_sensor_history"
             && observation.owned_capture
             && observation.warning_count == 0
     }));

@@ -68,6 +68,7 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
+			F100000000000000000000A1 /* WhoopUI/DateStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A1 /* WhoopUI/DateStripView.swift */; };
 			F100000000000000000000E4 /* WhoopUI/SelectedDayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E4 /* WhoopUI/SelectedDayStore.swift */; };
 			F100000000000000000000E3 /* WhoopUI/WhoopOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E3 /* WhoopUI/WhoopOverview.swift */; };
 			F100000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift */; };
@@ -274,6 +275,7 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000A1 /* WhoopUI/DateStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/DateStripView.swift; sourceTree = "<group>"; };
 			F200000000000000000000E4 /* WhoopUI/SelectedDayStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SelectedDayStore.swift; sourceTree = "<group>"; };
 			F200000000000000000000E3 /* WhoopUI/WhoopOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopOverview.swift; sourceTree = "<group>"; };
 			F200000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseOffloadDebugRow.swift; sourceTree = "<group>"; };
@@ -604,6 +606,7 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
+				F200000000000000000000A1 /* WhoopUI/DateStripView.swift */,
 				F200000000000000000000E4 /* WhoopUI/SelectedDayStore.swift */,
 				F200000000000000000000E3 /* WhoopUI/WhoopOverview.swift */,
 				F200000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift */,
@@ -973,6 +976,7 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
+				F100000000000000000000A1 /* WhoopUI/DateStripView.swift in Sources */,
 				F100000000000000000000E4 /* WhoopUI/SelectedDayStore.swift in Sources */,
 				F100000000000000000000E3 /* WhoopUI/WhoopOverview.swift in Sources */,
 				F100000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift in Sources */,

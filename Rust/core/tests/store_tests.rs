@@ -419,7 +419,15 @@ fn stores_raw_evidence_and_decoded_frame_with_provenance_link() {
         .unwrap();
     assert_eq!(decoded.len(), 1);
     assert_eq!(decoded[0].packet_type_name.as_deref(), Some("COMMAND"));
-    assert!(decoded[0].parsed_payload_json.contains("GET_HELLO"));
+    // GET_HELLO is mirrored into the typed strap_commands table; the
+    // legacy parsed_payload_json column is now nullified.
+    let commands = store.strap_commands_between(0, i64::MAX).unwrap();
+    assert!(
+        commands
+            .iter()
+            .any(|cmd| cmd.command_name.as_deref() == Some("GET_HELLO")),
+        "expected get_hello in strap_commands, got {commands:?}"
+    );
 }
 
 #[test]

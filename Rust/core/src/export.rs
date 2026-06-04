@@ -1978,7 +1978,6 @@ fn decoded_rows_for_raw_byte_policy(
         .cloned()
         .map(|mut row| {
             row.payload_hex.clear();
-            row.parsed_payload_json = raw_byte_policy_json_text(&row.parsed_payload_json)?;
             Ok(row)
         })
         .collect()
@@ -2142,7 +2141,7 @@ fn write_decoded_csv(path: &Path, rows: &[DecodedFrameRow]) -> GooseResult<Vec<u
     let mut bytes = Vec::new();
     writeln!(
         bytes,
-        "frame_id,evidence_id,captured_at,device_type,raw_len,header_len,declared_len,payload_hex,payload_crc_hex,header_crc_valid,payload_crc_valid,packet_type,packet_type_name,sequence,command_or_event,parsed_payload_json,parser_version,warnings_json"
+        "frame_id,evidence_id,captured_at,device_type,raw_len,header_len,declared_len,payload_hex,payload_crc_hex,header_crc_valid,payload_crc_valid,packet_type,packet_type_name,sequence,command_or_event,packet_family,parser_version,warnings_json"
     )
     .map_err(|error| GooseError::message(format!("cannot write CSV header: {error}")))?;
     for row in rows {
@@ -2170,7 +2169,7 @@ fn write_decoded_csv(path: &Path, rows: &[DecodedFrameRow]) -> GooseResult<Vec<u
                 &row.command_or_event
                     .map(|value| value.to_string())
                     .unwrap_or_default(),
-                &row.parsed_payload_json,
+                row.packet_family.as_deref().unwrap_or_default(),
                 &row.parser_version,
                 &row.warnings_json,
             ],
@@ -2281,13 +2280,11 @@ fn export_sensor_samples(
 ) -> GooseResult<Vec<ExportSensorSampleRow>> {
     let mut rows = Vec::new();
     for row in decoded_rows {
-        let parsed_payload: ParsedPayload = serde_json::from_str(&row.parsed_payload_json)
-            .map_err(|error| {
-                GooseError::message(format!(
-                    "{} parsed_payload_json invalid for sensor export: {error}",
-                    row.frame_id
-                ))
-            })?;
+        let Some(parsed_payload) =
+            crate::protocol::parsed_payload_from_payload_hex(&row.payload_hex, &row.frame_id)?
+        else {
+            continue;
+        };
         let ParsedPayload::DataPacket {
             packet_k,
             domain,
@@ -2398,6 +2395,12 @@ fn export_sensor_samples(
                 // them as decoded-frame sample rows yet to avoid blowing up
                 // raw-export size; revisit if/when we need per-channel rows
                 // in the offline analysis tooling.
+            }
+            DataPacketBodySummary::PulseInformation { .. } => {
+                // K26 pulse_information samples are persisted directly to
+                // raw_r17_packets via the live notification pipeline; same
+                // rationale as RawSensorHistory — keep them out of the
+                // raw-export decoded-frame sample stream to limit size.
             }
         }
     }
@@ -4836,17 +4839,9 @@ fn validate_decoded_frame_reimport(
                 issues,
             );
         }
-        validate_json_text(
-            &row.parsed_payload_json,
-            &format!("decoded frame {} parsed_payload_json", row.frame_id),
-            issues,
-        );
-        validate_raw_byte_json_policy(
-            &row.parsed_payload_json,
-            include_raw_bytes,
-            &format!("decoded frame {} parsed_payload_json", row.frame_id),
-            issues,
-        );
+        // parsed_payload_json was retired in v19; the export validator
+        // no longer checks it. warnings_json stays a JSON array of strings.
+        let _ = include_raw_bytes;
         validate_json_text(
             &row.warnings_json,
             &format!("decoded frame {} warnings_json", row.frame_id),
@@ -6991,6 +6986,9 @@ fn value_contains_official_whoop_label_marker(value: &Value) -> bool {
 
 fn is_official_whoop_label_token(value: &str) -> bool {
     let normalized = normalized_marker(value);
+    if normalized == "official_whoop_values_are_validation_labels_not_inputs" {
+        return false;
+    }
     matches!(
         normalized.as_str(),
         "whoop"

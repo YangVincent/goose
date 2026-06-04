@@ -321,6 +321,89 @@ pub struct SleepAudioEventRow {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StrapWornSampleRow {
+    pub captured_at_ms: i64,
+    pub worn: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StrapEventRow {
+    pub event_uid: String,
+    pub captured_at_ms: i64,
+    pub packet_type: Option<i64>,
+    pub event_id: Option<i64>,
+    pub event_name: Option<String>,
+    pub timestamp_seconds: Option<i64>,
+    pub timestamp_subseconds: Option<i64>,
+    pub worn: Option<bool>,
+    pub battery_pct: Option<i64>,
+    pub data_hex: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StrapCommandRow {
+    pub command_uid: String,
+    pub captured_at_ms: i64,
+    pub packet_type: i64,
+    pub command: Option<i64>,
+    pub command_name: Option<String>,
+    pub sequence: Option<i64>,
+    pub data_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RawK26PacketRow {
+    pub packet_id: String,
+    pub captured_at_ms: i64,
+    pub counter: Option<i64>,
+    pub sample_count: i64,
+    pub samples: Vec<i16>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConsoleLogRow {
+    pub log_uid: String,
+    pub captured_at_ms: i64,
+    pub packet_type: Option<i64>,
+    pub level: Option<String>,
+    pub text: Option<String>,
+    pub data_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MetadataPacketRow {
+    pub packet_uid: String,
+    pub captured_at_ms: i64,
+    pub packet_type: i64,
+    pub data_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CommandResponseRow {
+    pub response_uid: String,
+    pub captured_at_ms: i64,
+    pub packet_type: Option<i64>,
+    pub response_to_command: Option<i64>,
+    pub response_to_command_name: Option<String>,
+    pub origin_sequence: Option<i64>,
+    pub result_code: Option<i64>,
+    pub data_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RawPacketBodyRow {
+    pub packet_uid: String,
+    pub captured_at_ms: i64,
+    pub packet_type: i64,
+    pub packet_type_name: Option<String>,
+    pub sequence: Option<i64>,
+    pub command_or_event: Option<i64>,
+    pub payload_hex: String,
+}
+
 /// One-shot recovery summary returned by
 /// `recover_hr_samples_from_decoded_frames`. Diagnostic only; callers can
 /// surface this to the UI ("recovered N HR samples from decoded frames").
@@ -685,13 +768,20 @@ impl GooseStore {
     ///   - "heart_rate"      (K10/K21)
     ///
     /// Returns a diagnostic report.
+    /// Back-fill `hr_samples` rows from historical `decoded_frames` whose
+    /// HR byte wasn't mirrored at insert time. Re-parses `payload_hex`
+    /// (the canonical raw bytes) on the fly rather than reading any JSON
+    /// column, so this still works after `parsed_payload_json` is dropped.
     pub fn recover_hr_samples_from_decoded_frames(
         &self,
         start_ms: i64,
         end_ms: i64,
     ) -> GooseResult<HrRecoveryReport> {
+        use crate::protocol::{
+            DataPacketBodySummary, DeviceType, ParsedPayload, build_v5_payload_frame, parse_frame,
+        };
         let mut stmt = self.conn.prepare(
-            "SELECT frame_id, parsed_payload_json, created_at
+            "SELECT frame_id, payload_hex, created_at
              FROM decoded_frames
              ORDER BY created_at ASC",
         )?;
@@ -704,25 +794,41 @@ impl GooseStore {
 
         while let Some(row) = rows.next()? {
             let frame_id: String = row.get(0)?;
-            let parsed_json: String = row.get(1)?;
+            let payload_hex: String = row.get(1)?;
             let created_at: String = row.get(2)?;
             frames_scanned += 1;
             let captured_at_ms = parse_iso8601_to_ms(&created_at).unwrap_or(0);
             if captured_at_ms < start_ms || captured_at_ms >= end_ms {
                 continue;
             }
-            let value: serde_json::Value = match serde_json::from_str(&parsed_json) {
-                Ok(v) => v,
-                Err(_) => continue,
+            let Ok(payload_bytes) = hex::decode(&payload_hex) else {
+                continue;
             };
-            let body = value
-                .get("parsed_payload")
-                .and_then(|p| p.get("body_summary"));
-            let Some(body) = body else { continue };
-            let bpm = body
-                .get("heart_rate_bpm")
-                .and_then(|v| v.as_i64())
-                .or_else(|| body.get("heart_rate").and_then(|v| v.as_i64()));
+            let frame_bytes = build_v5_payload_frame(&payload_bytes);
+            let Ok(frame) = parse_frame(DeviceType::Goose, &frame_bytes) else {
+                continue;
+            };
+            let bpm = match frame.parsed_payload.as_ref() {
+                Some(ParsedPayload::DataPacket {
+                    body_summary: Some(body),
+                    ..
+                }) => match body {
+                    DataPacketBodySummary::NormalHistory {
+                        heart_rate_bpm: Some(bpm),
+                        ..
+                    }
+                    | DataPacketBodySummary::RawSensorHistory {
+                        heart_rate_bpm: Some(bpm),
+                        ..
+                    } => Some(i64::from(*bpm)),
+                    DataPacketBodySummary::RawMotionK10 {
+                        heart_rate: Some(bpm),
+                        ..
+                    } => Some(i64::from(*bpm)),
+                    _ => None,
+                },
+                _ => None,
+            };
             let Some(bpm) = bpm else { continue };
             if !(20..=240).contains(&bpm) {
                 continue;
@@ -1131,6 +1237,253 @@ impl GooseStore {
                 kind: row.get(4)?,
                 file_path: row.get(5)?,
                 created_at: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// One row per STRAP_CONDITION_REPORT (~every 10 minutes) covering the
+    /// requested window. Callers use this to derive worn intervals: each
+    /// pair of consecutive same-value rows defines a confirmed worn/off
+    /// span; transitions narrow the boundary to within the ~10-minute
+    /// reporting cadence.
+    pub fn strap_worn_samples_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<StrapWornSampleRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT captured_at_ms, worn
+             FROM strap_worn_samples
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            let worn_int: i64 = row.get(1)?;
+            Ok(StrapWornSampleRow {
+                captured_at_ms: row.get(0)?,
+                worn: worn_int != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn strap_events_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<StrapEventRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT event_uid, captured_at_ms, packet_type, event_id,
+                    event_name, timestamp_seconds, timestamp_subseconds,
+                    worn, battery_pct, data_hex, created_at
+             FROM strap_events
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            let worn_raw: Option<i64> = row.get(7)?;
+            Ok(StrapEventRow {
+                event_uid: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                packet_type: row.get(2)?,
+                event_id: row.get(3)?,
+                event_name: row.get(4)?,
+                timestamp_seconds: row.get(5)?,
+                timestamp_subseconds: row.get(6)?,
+                worn: worn_raw.map(|v| v != 0),
+                battery_pct: row.get(8)?,
+                data_hex: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn strap_commands_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<StrapCommandRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT command_uid, captured_at_ms, packet_type, command,
+                    command_name, sequence, data_hex
+             FROM strap_commands
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(StrapCommandRow {
+                command_uid: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                packet_type: row.get(2)?,
+                command: row.get(3)?,
+                command_name: row.get(4)?,
+                sequence: row.get(5)?,
+                data_hex: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn raw_k26_packets_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<RawK26PacketRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT packet_id, captured_at_ms, counter, sample_count,
+                    samples_blob, source
+             FROM raw_k26_packets
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            let blob: Vec<u8> = row.get(4)?;
+            let mut samples = Vec::with_capacity(blob.len() / 2);
+            for chunk in blob.chunks_exact(2) {
+                samples.push(i16::from_le_bytes([chunk[0], chunk[1]]));
+            }
+            Ok(RawK26PacketRow {
+                packet_id: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                counter: row.get(2)?,
+                sample_count: row.get(3)?,
+                samples,
+                source: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn console_logs_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<ConsoleLogRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT log_uid, captured_at_ms, packet_type, level, text, data_hex
+             FROM console_logs
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(ConsoleLogRow {
+                log_uid: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                packet_type: row.get(2)?,
+                level: row.get(3)?,
+                text: row.get(4)?,
+                data_hex: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn metadata_packets_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<MetadataPacketRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT packet_uid, captured_at_ms, packet_type, data_hex
+             FROM metadata_packets
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(MetadataPacketRow {
+                packet_uid: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                packet_type: row.get(2)?,
+                data_hex: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn command_responses_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<CommandResponseRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT response_uid, captured_at_ms, packet_type,
+                    response_to_command, response_to_command_name,
+                    origin_sequence, result_code, data_hex
+             FROM command_responses
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(CommandResponseRow {
+                response_uid: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                packet_type: row.get(2)?,
+                response_to_command: row.get(3)?,
+                response_to_command_name: row.get(4)?,
+                origin_sequence: row.get(5)?,
+                result_code: row.get(6)?,
+                data_hex: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn raw_packet_bodies_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<RawPacketBodyRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT packet_uid, captured_at_ms, packet_type,
+                    packet_type_name, sequence, command_or_event,
+                    payload_hex
+             FROM raw_packet_bodies
+             WHERE captured_at_ms >= ?1 AND captured_at_ms < ?2
+             ORDER BY captured_at_ms ASC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(RawPacketBodyRow {
+                packet_uid: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                packet_type: row.get(2)?,
+                packet_type_name: row.get(3)?,
+                sequence: row.get(4)?,
+                command_or_event: row.get(5)?,
+                payload_hex: row.get(6)?,
             })
         })?;
         let mut out = Vec::new();

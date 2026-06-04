@@ -511,7 +511,11 @@ fn observability_timeline_threads_capture_session_story_and_imports() {
 }
 
 #[test]
-fn timeline_reports_malformed_decoded_payload_json() {
+fn timeline_reports_malformed_decoded_payload_hex() {
+    // timeline_row_from_decoded_frame now re-parses payload_hex into a
+    // ParsedPayload (parsed_payload_json is no longer consulted), so the
+    // "malformed payload" case is now invalid hex on the canonical
+    // payload_hex column rather than invalid JSON on the deprecated mirror.
     let rows = vec![DecodedFrameRow {
         frame_id: "bad-frame".to_string(),
         evidence_id: "evidence-1".to_string(),
@@ -520,7 +524,7 @@ fn timeline_reports_malformed_decoded_payload_json() {
         raw_len: 1,
         header_len: 1,
         declared_len: 1,
-        payload_hex: "ff".to_string(),
+        payload_hex: "zz".to_string(),
         payload_crc_hex: String::new(),
         header_crc_valid: true,
         payload_crc_valid: true,
@@ -528,14 +532,14 @@ fn timeline_reports_malformed_decoded_payload_json() {
         packet_type_name: None,
         sequence: None,
         command_or_event: None,
-        parsed_payload_json: "{not-json".to_string(),
         parser_version: "test".to_string(),
         warnings_json: "[]".to_string(),
+        packet_family: None,
     }];
 
     let error = packet_timeline_from_decoded_frames(&rows).unwrap_err();
 
-    assert!(error.to_string().contains("bad-frame parsed_payload_json"));
+    assert!(error.to_string().contains("bad-frame payload_hex invalid"));
 }
 
 fn capture_session_story_event(

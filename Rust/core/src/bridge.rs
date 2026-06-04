@@ -2549,6 +2549,38 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(swift_caches_append_sleep_audio_event_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_strap_worn_samples" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_strap_worn_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_strap_events" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_strap_events_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_raw_k26_packets" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_raw_k26_packets_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_strap_commands" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_strap_commands_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_console_logs" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_console_logs_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_metadata_packets" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_metadata_packets_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_command_responses" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_command_responses_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_raw_packet_bodies" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_raw_packet_bodies_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "swift_caches.list_sleep_audio_events" => request_args::<SwiftCacheRangeArgs>(&request)
             .and_then(swift_caches_list_sleep_audio_events_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2790,6 +2822,7 @@ fn body_summary_kind(summary: Option<&DataPacketBodySummary>) -> &'static str {
         Some(DataPacketBodySummary::RawMotionK10 { .. }) => "raw_motion_k10",
         Some(DataPacketBodySummary::RawMotionK21 { .. }) => "raw_motion_k21",
         Some(DataPacketBodySummary::RawSensorHistory { .. }) => "raw_sensor_history",
+        Some(DataPacketBodySummary::PulseInformation { .. }) => "pulse_information",
         None => "none",
     }
 }
@@ -8360,6 +8393,102 @@ fn swift_caches_list_sleep_audio_events_bridge(
         "schema": "goose.sleep-audio-events.v1",
         "event_count": rows.len(),
         "events": rows,
+    }))
+}
+
+fn swift_caches_list_strap_worn_samples_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.strap_worn_samples_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.strap-worn-samples.v1",
+        "sample_count": rows.len(),
+        "samples": rows,
+    }))
+}
+
+fn swift_caches_list_strap_events_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.strap_events_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.strap-events.v1",
+        "event_count": rows.len(),
+        "events": rows,
+    }))
+}
+
+fn swift_caches_list_raw_k26_packets_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.raw_k26_packets_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.raw-k26-packets.v1",
+        "packet_count": rows.len(),
+        "packets": rows,
+    }))
+}
+
+fn swift_caches_list_strap_commands_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.strap_commands_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.strap-commands.v1",
+        "command_count": rows.len(),
+        "commands": rows,
+    }))
+}
+
+fn swift_caches_list_console_logs_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.console_logs_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.console-logs.v1",
+        "log_count": rows.len(),
+        "logs": rows,
+    }))
+}
+
+fn swift_caches_list_metadata_packets_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.metadata_packets_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.metadata-packets.v1",
+        "packet_count": rows.len(),
+        "packets": rows,
+    }))
+}
+
+fn swift_caches_list_command_responses_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.command_responses_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.command-responses.v1",
+        "response_count": rows.len(),
+        "responses": rows,
+    }))
+}
+
+fn swift_caches_list_raw_packet_bodies_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.raw_packet_bodies_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.raw-packet-bodies.v1",
+        "packet_count": rows.len(),
+        "packets": rows,
     }))
 }
 

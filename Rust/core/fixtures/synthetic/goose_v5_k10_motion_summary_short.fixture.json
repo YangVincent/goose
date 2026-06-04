@@ -1,98 +1,101 @@
 {
-  "id": "synthetic.goose.v5.k10_motion_summary_short",
-  "path": "synthetic/goose_v5_k10_motion_summary_short.hex",
-  "kind": "synthetic",
-  "source": "Hand-derived shortened Goose v5 K10 raw-motion frame using APK uo0.a offsets.",
-  "captured_at": "2026-05-27T00:31:00Z",
-  "device_model": "WHOOP 5.0 Goose",
-  "device_firmware": "synthetic",
   "app_version": "not_applicable",
-  "schema": "goose.frame.hex.v1",
+  "captured_at": "2026-05-27T00:31:00Z",
   "consent": "synthetic-no-user-data",
-  "sensitivity": "public-test-fixture",
-  "notes": "Short K10 fixture validates heart-rate byte, signed accelerometer preview stats, truncation warnings, and raw body preservation without pretending motion units are known.",
+  "device_firmware": "synthetic",
+  "device_model": "WHOOP 5.0 Goose",
   "expected": {
+    "command_or_event": 1,
     "device_type": "GOOSE",
+    "header_crc_valid": true,
     "packet_type": 43,
     "packet_type_name": "REALTIME_RAW_DATA",
-    "sequence": 10,
-    "command_or_event": 1,
-    "header_crc_valid": true,
-    "payload_crc_valid": true,
     "parsed_payload": {
-      "kind": "data_packet",
-      "packet_k": 10,
-      "domain": "raw_motion_stream_result",
-      "status_or_stream": 1,
-      "counter_or_page": 0,
-      "timestamp_seconds": 0,
-      "timestamp_subseconds": 0,
+      "body_hex": "0000000048000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100feff03000000000000",
       "body_offset": 13,
       "body_summary": {
-        "kind": "raw_motion_k10",
-        "heart_rate": 72,
         "axes": [
           {
+            "expected_count": 100,
+            "max": 3,
+            "min": -2,
             "name": "accelerometer_x",
             "offset": 85,
-            "expected_count": 100,
             "parsed_count": 5,
-            "min": -2,
-            "max": 3,
-            "sum": 2,
-            "preview": [1, -2, 3, 0, 0]
+            "preview": [
+              1,
+              -2,
+              3,
+              0,
+              0
+            ],
+            "samples": [
+              1,
+              -2,
+              3,
+              0,
+              0
+            ],
+            "sum": 2
           },
           {
+            "expected_count": 100,
+            "max": null,
+            "min": null,
             "name": "accelerometer_y",
             "offset": 285,
-            "expected_count": 100,
             "parsed_count": 0,
-            "min": null,
-            "max": null,
-            "sum": 0,
-            "preview": []
+            "preview": [],
+            "samples": [],
+            "sum": 0
           },
           {
+            "expected_count": 100,
+            "max": null,
+            "min": null,
             "name": "accelerometer_z",
             "offset": 485,
-            "expected_count": 100,
             "parsed_count": 0,
-            "min": null,
-            "max": null,
-            "sum": 0,
-            "preview": []
+            "preview": [],
+            "samples": [],
+            "sum": 0
           },
           {
+            "expected_count": 100,
+            "max": null,
+            "min": null,
             "name": "gyroscope_x",
             "offset": 688,
-            "expected_count": 100,
             "parsed_count": 0,
-            "min": null,
-            "max": null,
-            "sum": 0,
-            "preview": []
+            "preview": [],
+            "samples": [],
+            "sum": 0
           },
           {
+            "expected_count": 100,
+            "max": null,
+            "min": null,
             "name": "gyroscope_y",
             "offset": 888,
-            "expected_count": 100,
             "parsed_count": 0,
-            "min": null,
-            "max": null,
-            "sum": 0,
-            "preview": []
+            "preview": [],
+            "samples": [],
+            "sum": 0
           },
           {
+            "expected_count": 100,
+            "max": null,
+            "min": null,
             "name": "gyroscope_z",
             "offset": 1088,
-            "expected_count": 100,
             "parsed_count": 0,
-            "min": null,
-            "max": null,
-            "sum": 0,
-            "preview": []
+            "preview": [],
+            "samples": [],
+            "sum": 0
           }
         ],
+        "heart_rate": 72,
+        "kind": "raw_motion_k10",
         "warnings": [
           "accelerometer_x_truncated",
           "accelerometer_y_truncated",
@@ -101,7 +104,33 @@
           "gyroscope_y_truncated",
           "gyroscope_z_truncated"
         ]
-      }
-    }
-  }
+      },
+      "counter_or_page": 0,
+      "domain": "raw_motion_stream_result",
+      "hr_marker_offset": null,
+      "hr_present_marker": null,
+      "kind": "data_packet",
+      "packet_k": 10,
+      "status_or_stream": 1,
+      "timestamp_seconds": 0,
+      "timestamp_subseconds": 0,
+      "warnings": [
+        "accelerometer_x_truncated",
+        "accelerometer_y_truncated",
+        "accelerometer_z_truncated",
+        "gyroscope_x_truncated",
+        "gyroscope_y_truncated",
+        "gyroscope_z_truncated"
+      ]
+    },
+    "payload_crc_valid": true,
+    "sequence": 10
+  },
+  "id": "synthetic.goose.v5.k10_motion_summary_short",
+  "kind": "synthetic",
+  "notes": "Short K10 fixture validates heart-rate byte, signed accelerometer preview stats, truncation warnings, and raw body preservation without pretending motion units are known.",
+  "path": "synthetic/goose_v5_k10_motion_summary_short.hex",
+  "schema": "goose.frame.hex.v1",
+  "sensitivity": "public-test-fixture",
+  "source": "Hand-derived shortened Goose v5 K10 raw-motion frame using APK uo0.a offsets."
 }

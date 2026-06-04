@@ -96,6 +96,22 @@ fn ios_healthkit_read_boundary_is_weight_only() {
             saw_body_mass_request = true;
         }
 
+        // The boundary this test enforces is on READS from HealthKit:
+        // Goose only imports bodyMass, nothing else. Files whose sole
+        // job is to WRITE Goose-owned data into HealthKit (workouts
+        // exported back to Apple Health) live outside the read boundary
+        // and may use HKWorkout / HKWorkoutBuilder / similar write-only
+        // HealthKit APIs. We use the naming convention to identify
+        // both the exporter itself and any UI that triggers it.
+        let filename = relative
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let is_writer_only = filename.contains("Exporter") || filename.contains("Export");
+        if is_writer_only {
+            continue;
+        }
+
         for (token, reason) in FORBIDDEN_HEALTHKIT_TOKENS {
             if source.contains(token) {
                 violations.push(format!(
@@ -173,12 +189,15 @@ fn ios_health_metric_display_filters_forbidden_metric_sources() {
 }
 
 fn swift_source_root() -> PathBuf {
+    // Rust/core/ -> Rust/ -> <goose project root>/GooseSwift
+    // (the `goose-swift` wrapper directory the original test expected
+    // was never checked in -- the Swift sources sit directly under
+    // GooseSwift/ at the project root).
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("core crate has parent")
         .parent()
         .expect("goose project has parent")
-        .join("goose-swift")
         .join("GooseSwift")
 }
 

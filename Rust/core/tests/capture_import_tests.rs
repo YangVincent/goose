@@ -82,19 +82,23 @@ fn imports_indexed_frame_fixture_into_sqlite_raw_and_decoded_tables() {
         .find(|fixture| fixture.id == "synthetic.goose.v5.k10_motion_summary_short")
         .unwrap();
     assert_eq!(motion.parsed_payload_kind.as_deref(), Some("data_packet"));
+    // The K10 packet's body summary now lives in the typed packet_family
+    // column (raw_motion_k10 mirror) instead of parsed_payload_json, and
+    // the parser-emitted warnings are surfaced through warnings_json on
+    // the decoded frame row.
     let decoded_motion = store
         .decoded_frame("synthetic.goose.v5.k10_motion_summary_short.frame.0")
         .unwrap()
         .unwrap();
-    let parsed_payload: serde_json::Value =
-        serde_json::from_str(&decoded_motion.parsed_payload_json).unwrap();
-    assert_eq!(parsed_payload["body_summary"]["kind"], "raw_motion_k10");
+    assert_eq!(
+        decoded_motion.packet_family.as_deref(),
+        Some("K10/raw_motion_stream_result")
+    );
+    let warnings: Vec<String> =
+        serde_json::from_str(&decoded_motion.warnings_json).unwrap();
     assert!(
-        parsed_payload["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|warning| warning == "accelerometer_x_truncated")
+        warnings.iter().any(|w| w == "accelerometer_x_truncated"),
+        "expected accelerometer_x_truncated in {warnings:?}"
     );
 
     let sanitized_batch_motion = report

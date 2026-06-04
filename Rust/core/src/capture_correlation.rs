@@ -204,17 +204,16 @@ pub fn run_capture_correlation_for_rows(
             ));
             continue;
         };
-        let parsed_payload: Option<ParsedPayload> =
-            match serde_json::from_str(&row.parsed_payload_json) {
-                Ok(parsed_payload) => parsed_payload,
-                Err(source) => {
-                    issues.push(format!(
-                        "{} parsed_payload_json invalid: {source}",
-                        row.frame_id
-                    ));
-                    continue;
-                }
-            };
+        let parsed_payload: Option<ParsedPayload> = match crate::protocol::parsed_payload_from_payload_hex(
+            &row.payload_hex,
+            &row.frame_id,
+        ) {
+            Ok(parsed_payload) => parsed_payload,
+            Err(source) => {
+                issues.push(format!("{} payload re-parse failed: {source}", row.frame_id));
+                continue;
+            }
+        };
         push_decoded_frame_observation(&mut observations, raw, row, parsed_payload.as_ref());
     }
 
@@ -672,6 +671,7 @@ fn body_summary_kind(summary: &DataPacketBodySummary) -> &'static str {
         DataPacketBodySummary::RawMotionK10 { .. } => "raw_motion_k10",
         DataPacketBodySummary::RawMotionK21 { .. } => "raw_motion_k21",
         DataPacketBodySummary::RawSensorHistory { .. } => "raw_sensor_history",
+        DataPacketBodySummary::PulseInformation { .. } => "pulse_information",
     }
 }
 

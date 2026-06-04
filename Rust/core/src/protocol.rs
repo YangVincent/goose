@@ -102,6 +102,15 @@ pub enum ParsedPayload {
         timestamp_subseconds: Option<u16>,
         data_offset: usize,
         data_hex: String,
+        /// For event 29 (STRAP_CONDITION_REPORT): byte 10 of the event data
+        /// is the worn bit (0x01 = on body, 0x00 = off body). Empirically
+        /// confirmed by comparing the user-known on/off transition window
+        /// against the byte stream.
+        worn: Option<bool>,
+        /// For event 3 (BATTERY_LEVEL): byte 15 of the event data is the
+        /// battery percentage (0-100). RE'd from a discharging session
+        /// where the byte tracked the known battery curve.
+        battery_pct: Option<u8>,
         warnings: Vec<String>,
     },
     DataPacket {
@@ -137,10 +146,11 @@ pub enum DataPacketBodySummary {
         /// K-versions in this family (7, 9), the byte is a presence marker;
         /// the BPM lives elsewhere and we don't extract it yet.
         heart_rate_bpm: Option<u8>,
-        /// K18 packets also carry SpO₂ % at offset 48, an RR interval at
-        /// offset 23 (if rr_control low nibble ≥ 1), and an accelerometer
-        /// gravity vector at offsets 30-42. We extract them so the on-device
-        /// pipeline has the same channels K12/K24 give us.
+        /// Empirically RE'd from the user's strap firmware: K18 packets
+        /// carry the gravity vector at body offset 24-35 (3 × f32 LE).
+        /// SpO₂ and RR are NOT present in this K18 variant — the bytes the
+        /// OpenWhoop V18 parser claims for them are flag/status fields,
+        /// not biometric values. Kept as Option for future variants.
         spo2_pct: Option<u8>,
         rr_interval_ms: Option<u16>,
         accel_gravity: Option<[f32; 3]>,
@@ -175,6 +185,17 @@ pub enum DataPacketBodySummary {
         rr_intervals_ms: Vec<u16>,
         sensor_data: Option<SensorData>,
         accel_gravity: Option<[f32; 3]>,
+        warnings: Vec<String>,
+    },
+    /// K26 'pulse_information_packet' (63-byte payload). Empirically RE'd
+    /// from real captures: header bytes 0-5, then 24 × i16 LE optical
+    /// samples at offsets 6-53, then 4 trailing status bytes (54-57)
+    /// plus a 5-byte tail (58-62). The optical samples appear to be a
+    /// PPG-derived signal series streamed during workouts.
+    PulseInformation {
+        header_byte_0: Option<u8>,
+        counter: Option<u16>,
+        samples: Vec<i16>,
         warnings: Vec<String>,
     },
 }
@@ -398,6 +419,24 @@ pub fn parse_frame(device_type: DeviceType, frame: &[u8]) -> GooseResult<ParsedF
     })
 }
 
+/// Re-parse a raw `payload_hex` string (the bytes stored in
+/// `decoded_frames.payload_hex`) back into a `ParsedPayload`. The frame is
+/// reconstructed by wrapping the payload with `build_v5_payload_frame`
+/// (which adds the v5 header + CRC), then run through `parse_frame`. This
+/// is the canonical replacement for reading `parsed_payload_json` — the
+/// raw bytes are the authoritative source.
+pub fn parsed_payload_from_payload_hex(
+    payload_hex: &str,
+    context: &str,
+) -> GooseResult<Option<ParsedPayload>> {
+    let bytes = hex::decode(payload_hex)
+        .map_err(|error| GooseError::message(format!("{context} payload_hex invalid: {error}")))?;
+    let frame_bytes = build_v5_payload_frame(&bytes);
+    let frame = parse_frame(DeviceType::Goose, &frame_bytes)
+        .map_err(|error| GooseError::message(format!("{context} payload re-parse failed: {error}")))?;
+    Ok(frame.parsed_payload)
+}
+
 pub fn build_v5_command_frame(sequence: u8, command: u8, data: &[u8]) -> Vec<u8> {
     let mut payload = vec![PACKET_TYPE_COMMAND, sequence, command];
     payload.extend_from_slice(data);
@@ -528,13 +567,30 @@ fn parse_event_payload(payload: &[u8]) -> ParsedPayload {
         warnings.push("event_payload_header_too_short".to_string());
     }
     let event_id = read_u16_le(payload, 2);
+    let data_offset = 12.min(payload.len());
+    let data_slice = &payload[data_offset..];
+    // STRAP_CONDITION_REPORT (event id 29) carries a worn bit at data
+    // offset 10 (0x01 = on body, 0x00 = off body). Decode here so worn
+    // intervals can be derived directly from `decoded_frames`.
+    let worn = match (event_id, data_slice.get(10).copied()) {
+        (Some(29), Some(byte)) => Some(byte != 0),
+        _ => None,
+    };
+    // BATTERY_LEVEL (event id 3) carries battery % at data offset 15.
+    // RE'd from a known discharge curve.
+    let battery_pct = match (event_id, data_slice.get(15).copied()) {
+        (Some(3), Some(byte)) if byte <= 100 => Some(byte),
+        _ => None,
+    };
     ParsedPayload::Event {
         event_id,
         event_name: event_id.and_then(strap_event_name).map(str::to_string),
         timestamp_seconds: read_u32_le(payload, 4),
         timestamp_subseconds: read_u16_le(payload, 8),
-        data_offset: 12.min(payload.len()),
-        data_hex: hex::encode(&payload[12.min(payload.len())..]),
+        data_offset,
+        data_hex: hex::encode(data_slice),
+        worn,
+        battery_pct,
         warnings,
     }
 }
@@ -586,6 +642,7 @@ fn parse_data_packet_body_summary(
         // quality, skin contact, gravity vector) plus BPM + RR intervals.
         // Use the richer parser, ported from OpenWhoop V12.
         12 | 24 => parse_k12_k24_body_summary(payload),
+        26 => parse_k26_pulse_information_body_summary(payload),
         7 | 9 | 18 => {
             let (spo2_pct, rr_interval_ms, accel_gravity) = if packet_k == 18 {
                 extract_k18_extended_fields(payload)
@@ -921,18 +978,61 @@ fn parse_k12_k24_body_summary(payload: &[u8]) -> (Option<DataPacketBodySummary>,
 ///   payload[24:26] RR interval (u16 LE, ms) when count >= 1
 ///   payload[30:42] accelerometer gravity vector (3 × f32 LE)
 ///   payload[48]    SpO₂ percentage (u8 0-100)
+/// Parse a K26 'pulse_information_packet' (packet_k = 26). Layout RE'd
+/// from real captures during workouts:
+///   bytes 0-1: header `44 00` (or `45 00`)
+///   bytes 2-3: u16 LE counter
+///   bytes 4-5: 2 status bytes
+///   bytes 6-53: 24 × i16 LE optical samples
+///   bytes 54-57: 4 trailing status bytes
+///   bytes 58-62: 5-byte tail
+fn parse_k26_pulse_information_body_summary(
+    payload: &[u8],
+) -> (Option<DataPacketBodySummary>, Vec<String>) {
+    let mut warnings = Vec::new();
+    if payload.len() < 54 {
+        warnings.push("k26_body_too_short".to_string());
+        return (None, warnings);
+    }
+    let header_byte_0 = payload.get(0).copied();
+    let counter = read_u16_le(payload, 2);
+    let mut samples: Vec<i16> = Vec::with_capacity(24);
+    for index in 0..24 {
+        let offset = 6 + index * 2;
+        if let (Some(b0), Some(b1)) = (
+            payload.get(offset).copied(),
+            payload.get(offset + 1).copied(),
+        ) {
+            samples.push(i16::from_le_bytes([b0, b1]));
+        }
+    }
+    (
+        Some(DataPacketBodySummary::PulseInformation {
+            header_byte_0,
+            counter,
+            samples,
+            warnings: warnings.clone(),
+        }),
+        warnings,
+    )
+}
+
 fn extract_k18_extended_fields(
     payload: &[u8],
 ) -> (Option<u8>, Option<u16>, Option<[f32; 3]>) {
-    let rr_interval_ms = match payload.get(23) {
-        Some(control) if (*control & 0x0f) >= 1 => read_u16_le(payload, 24),
-        _ => None,
-    };
+    // Empirically RE'd from 777 real K18 packets:
+    //   payload[24..36] = accelerometer gravity vector (3 × f32 LE), |g|≈1
+    //   SpO2 and RR are not present in this firmware's K18 variant — the
+    //   bytes OpenWhoop documents for them are status/counter fields in
+    //   ours. Leave both None until we find their real positions.
+    let spo2_pct: Option<u8> = None;
+    let rr_interval_ms: Option<u16> = None;
 
-    let accel_gravity = if payload.len() >= 42 {
+    let accel_gravity = if payload.len() >= 36 {
         let mut gravity = [0.0f32; 3];
+        let mut ok = true;
         for (index, slot) in gravity.iter_mut().enumerate() {
-            let offset = 30 + index * 4;
+            let offset = 24 + index * 4;
             if let (Some(b0), Some(b1), Some(b2), Some(b3)) = (
                 payload.get(offset).copied(),
                 payload.get(offset + 1).copied(),
@@ -940,16 +1040,22 @@ fn extract_k18_extended_fields(
                 payload.get(offset + 3).copied(),
             ) {
                 *slot = f32::from_le_bytes([b0, b1, b2, b3]);
+            } else {
+                ok = false;
             }
         }
-        Some(gravity)
+        if ok && gravity.iter().all(|g| g.is_finite() && g.abs() < 4.0) {
+            let mag = (gravity[0].powi(2) + gravity[1].powi(2) + gravity[2].powi(2)).sqrt();
+            if (0.5..=1.5).contains(&mag) {
+                Some(gravity)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     } else {
         None
-    };
-
-    let spo2_pct = match payload.get(48).copied() {
-        Some(value) if (1..=100).contains(&value) => Some(value),
-        _ => None,
     };
 
     (spo2_pct, rr_interval_ms, accel_gravity)

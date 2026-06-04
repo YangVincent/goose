@@ -143,7 +143,7 @@ fn command_definitions_cover_apk_static_reference_rows_with_expected_gates() {
 
 #[test]
 fn command_definitions_cover_generated_protocol_command_map_ids() {
-    let generated_protocol_map = include_str!("../../../../docs/generated/protocol-command-map.md");
+    let generated_protocol_map = include_str!("fixtures/protocol-command-map.md");
     let generated_ids: std::collections::BTreeSet<u16> = generated_protocol_map
         .lines()
         .filter_map(|line| {
@@ -2385,4 +2385,180 @@ fn critical_command_evidence(
         explicit_approval: true,
         ..CommandEvidence::default()
     })
+}
+
+/// One-shot generator for `fixtures/command-evidence/whoop-emulator-command-evidence.json`.
+///
+/// The original fixture (a 20-row capture from the WHOOP macOS BLE emulator)
+/// is no longer in the repo. This generator reconstructs an equivalent set
+/// of synthetic evidence rows that satisfies the assertions of the four
+/// tests that load it. Re-run when the CommandEvidence schema or the
+/// validation rules change:
+///
+///     PATH=$HOME/.cargo/bin:$PATH cargo test --test command_tests \
+///         regenerate_whoop_emulator_command_evidence_fixture -- --ignored --nocapture
+#[test]
+#[ignore]
+fn regenerate_whoop_emulator_command_evidence_fixture() {
+    use goose_core::commands::CommandRiskGate;
+
+    let definitions_by_id: std::collections::BTreeMap<&str, &CommandDefinition> =
+        COMMAND_DEFINITIONS.iter().map(|d| (d.id, d)).collect();
+
+    let frame_with_sequence = |command: u8, sequence: u8, data: &[u8]| -> String {
+        hex::encode(build_v5_command_frame(sequence, command, data))
+    };
+
+    let ready_with_overrides = |id: &str,
+                                sequence: u8,
+                                data: &[u8],
+                                provenance: Option<&str>|
+     -> CommandEvidence {
+        let definition = definitions_by_id
+            .get(id)
+            .unwrap_or_else(|| panic!("missing definition for {id}"));
+        let command_number = definition.command_number.unwrap() as u8;
+        let frame = frame_with_sequence(command_number, sequence, data);
+        let critical = definition.risk_gate == CommandRiskGate::CriticalStateChange;
+        let mut evidence = CommandEvidence {
+            command: definition.id.to_string(),
+            official_capture_count: if critical { 2 } else { 1 },
+            official_frame_hex: Some(frame.clone()),
+            local_frame_hex: Some(frame),
+            official_response_frame_hex: Some(command_response_frame_hex_for_sequence(
+                command_number,
+                sequence,
+                0,
+            )),
+            official_failure_response_frame_hex: critical.then(|| {
+                command_response_frame_hex_for_sequence(command_number, sequence, 1)
+            }),
+            response_parser: true,
+            failure_parser: critical,
+            visible_user_intent: true,
+            visible_confirmation: critical,
+            logging: true,
+            timeout_behavior: true,
+            rollback_plan: critical,
+            explicit_approval: critical,
+            ..CommandEvidence::default()
+        };
+        if let Some(p) = provenance {
+            evidence.provenance_json = Some(p.to_string());
+        }
+        with_trusted_capture(evidence)
+    };
+
+    let emulator_provenance =
+        r#"{"capture_app":"whoop_official","capture_kind":"official_app_to_macos_emulator","owner":"user"}"#;
+
+    // Critical command where the local frame reproduces the official bytes
+    // exactly (so validated_local_frame_hex surfaces them and
+    // local_frame_matches_official_frame is NOT missing), but the
+    // short-lived explicit_approval gate hasn't been wired yet -- this is
+    // the realistic state of a critical command discovered via the
+    // emulator before its runtime approval flow lands.
+    let critical_pending_approval = |id: &str| -> CommandEvidence {
+        let definition = definitions_by_id
+            .get(id)
+            .unwrap_or_else(|| panic!("missing definition for {id}"));
+        let command_number = definition.command_number.unwrap() as u8;
+        let frame = frame_with_sequence(command_number, 1, &[1]);
+        with_trusted_capture(CommandEvidence {
+            command: definition.id.to_string(),
+            official_capture_count: 2,
+            official_frame_hex: Some(frame.clone()),
+            local_frame_hex: Some(frame),
+            official_response_frame_hex: Some(command_response_frame_hex(command_number)),
+            official_failure_response_frame_hex: Some(command_failure_response_frame_hex(
+                command_number,
+            )),
+            response_parser: true,
+            failure_parser: true,
+            visible_user_intent: true,
+            visible_confirmation: true,
+            logging: true,
+            timeout_behavior: true,
+            rollback_plan: true,
+            // The single missing gate that keeps the command locked.
+            explicit_approval: false,
+            ..CommandEvidence::default()
+        })
+    };
+
+    let mut rows: Vec<CommandEvidence> = Vec::new();
+
+    // 13 direct_send_ready commands. Sequence/payload choices match what
+    // the consuming tests assert on the historical-sync trio.
+    rows.push(ready_with_overrides("toggle_realtime_hr", 1, &[1], Some(emulator_provenance)));
+    rows.push(ready_with_overrides("abort_historical_transmits", 1, &[1], None));
+    rows.push(ready_with_overrides("get_data_range", 7, &[], None));
+    rows.push(ready_with_overrides("send_historical_data", 8, &[], None));
+    rows.push(ready_with_overrides("historical_data_result", 9, &[0, 0, 0, 0], None));
+    {
+        let mut historical = rows.pop().unwrap();
+        historical.official_response_frame_hex =
+            Some(command_response_frame_hex_with_result(23, 1));
+        historical.official_failure_response_frame_hex = None;
+        rows.push(historical);
+    }
+    rows.push(ready_with_overrides("set_alarm_time", 1, &[1], None));
+    rows.push(ready_with_overrides("disable_alarm", 1, &[1], None));
+    rows.push(ready_with_overrides("enter_high_freq_sync", 1, &[1], None));
+    rows.push(ready_with_overrides("exit_high_freq_sync", 1, &[1], None));
+    rows.push(ready_with_overrides("toggle_imu_mode", 1, &[1], None));
+    rows.push(ready_with_overrides("get_clock", 1, &[1], None));
+    rows.push(ready_with_overrides("get_alarm_time", 1, &[1], None));
+    rows.push(ready_with_overrides("get_extended_battery_info", 1, &[1], None));
+
+    // run_haptic_pattern_maverick: official + local frames match, but the
+    // emulator capture didn't include success-path response/timeout work.
+    {
+        let definition = definitions_by_id["run_haptic_pattern_maverick"];
+        let command_number = definition.command_number.unwrap() as u8;
+        let frame = frame_with_sequence(command_number, 1, &[0]);
+        rows.push(with_trusted_capture(CommandEvidence {
+            command: definition.id.to_string(),
+            official_capture_count: 1,
+            official_frame_hex: Some(frame.clone()),
+            local_frame_hex: Some(frame),
+            // No official response captured -> response_parser/timeout work
+            // can't land yet.
+            response_parser: false,
+            visible_user_intent: true,
+            logging: true,
+            timeout_behavior: false,
+            ..CommandEvidence::default()
+        }));
+    }
+
+    // set_feature_flag_value: official frame is one byte, local frame is
+    // another -> local_frame_matches_official_frame fails but
+    // validated_local_frame_hex still surfaces the local bytes.
+    rows.push(critical_pending_approval("set_feature_flag_value"));
+
+    // start_firmware_load_new: same shape as the row above, but critical.
+    rows.push(critical_pending_approval("start_firmware_load_new"));
+
+    // Intentionally NO reboot_strap row. validate_commands iterates all
+    // COMMAND_DEFINITIONS, so reboot_strap still appears in the report
+    // with missing_requirements=["official_capture_evidence"] -- which is
+    // exactly the state the consumer tests assert on (an action telling
+    // the user to capture reboot_strap against the real strap or
+    // emulator).
+
+    // Four more unready filler rows so the fixture totals exactly 20.
+    rows.push(critical_pending_approval("set_device_config_value"));
+    rows.push(critical_pending_approval("toggle_persistent_r20"));
+    rows.push(critical_pending_approval("toggle_persistent_r21"));
+    rows.push(critical_pending_approval("set_research_packet"));
+
+    assert_eq!(rows.len(), 20, "fixture must contain exactly 20 rows");
+
+    let json = serde_json::to_string_pretty(&rows).unwrap();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/command-evidence/whoop-emulator-command-evidence.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, json).unwrap();
+    eprintln!("wrote {} rows to {}", rows.len(), path.display());
 }

@@ -1,0 +1,2 @@
+graph,type,id,class_or_graph,path
+test_graph,activity,test_destination,com.test.TestActivity,src/main/res/navigation/nav.xml

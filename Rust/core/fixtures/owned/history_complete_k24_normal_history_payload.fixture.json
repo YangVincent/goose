@@ -1,35 +1,62 @@
 {
-  "id": "owned.history_complete.k24_normal_history_payload",
-  "path": "owned/history_complete_k24_normal_history_payload.hex",
-  "kind": "user-owned_payload_capture",
-  "source": "android_btsnoop_full_snoop_history_complete_20260528T1748Z",
-  "captured_at": "2026-05-28T17:22:29.944091Z",
-  "device_model": "WHOOP 5.0 Goose",
-  "device_firmware": "owned-capture",
   "app_version": "whoop-official-capture",
-  "schema": "goose.payload.hex.v1",
+  "captured_at": "2026-05-28T17:22:29.944091Z",
   "consent": "user-owned-capture",
-  "sensitivity": "user-owned-capture",
-  "notes": "Owned Android btsnoop-derived K24 normal-history payload from captures/android/bugreport-full-snoop-history-complete-20260528T1748Z/hci-analysis/data-packets/K24.full.bin.",
+  "device_firmware": "owned-capture",
+  "device_model": "WHOOP 5.0 Goose",
   "expected": {
-    "device_type": "GOOSE",
-    "packet_type": 47,
-    "sequence": 24,
     "command_or_event": 0,
+    "device_type": "GOOSE",
     "header_crc_valid": true,
-    "payload_crc_valid": true,
+    "packet_type": 47,
     "packet_type_name": "HISTORICAL_DATA",
     "parsed_payload": {
+      "body_hex": "0000000033000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "body_offset": 13,
+      "body_summary": {
+        "accel_gravity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "heart_rate_bpm": null,
+        "kind": "raw_sensor_history",
+        "rr_count": 0,
+        "rr_intervals_ms": [],
+        "sensor_data": {
+          "ambient_light": 0,
+          "led_drive_1": 0,
+          "led_drive_2": 0,
+          "ppg_green": 0,
+          "ppg_red_ir": 0,
+          "resp_rate_raw": 0,
+          "signal_quality": 0,
+          "skin_contact": 0,
+          "skin_temp_raw": 0,
+          "spo2_ir": 0,
+          "spo2_red": 0
+        },
+        "warnings": []
+      },
+      "counter_or_page": 1,
+      "domain": "normal_history_with_hr_marker",
+      "hr_marker_offset": 17,
+      "hr_present_marker": 51,
       "kind": "data_packet",
       "packet_k": 24,
-      "domain": "normal_history_with_hr_marker",
-      "hr_present_marker": 51,
-      "body_summary": {
-        "kind": "normal_history",
-        "hr_present": true,
-        "marker_offset": 17,
-        "marker_value": 51
-      }
-    }
-  }
+      "status_or_stream": 0,
+      "timestamp_seconds": 1779000000,
+      "timestamp_subseconds": 0,
+      "warnings": []
+    },
+    "payload_crc_valid": true,
+    "sequence": 24
+  },
+  "id": "owned.history_complete.k24_normal_history_payload",
+  "kind": "user-owned_payload_capture",
+  "notes": "Owned Android btsnoop-derived K24 normal-history payload from captures/android/bugreport-full-snoop-history-complete-20260528T1748Z/hci-analysis/data-packets/K24.full.bin.",
+  "path": "owned/history_complete_k24_normal_history_payload.hex",
+  "schema": "goose.payload.hex.v1",
+  "sensitivity": "user-owned-capture",
+  "source": "android_btsnoop_full_snoop_history_complete_20260528T1748Z"
 }

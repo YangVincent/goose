@@ -2794,7 +2794,7 @@ fn query_decoded_packet_family_counts(
         .unwrap_or_default();
     let mut statement = connection.prepare(&format!(
         r#"
-        SELECT decoded_frames.packet_type_name, decoded_frames.parsed_payload_json
+        SELECT COALESCE(decoded_frames.packet_family, decoded_frames.packet_type_name, 'unknown') AS family
         FROM decoded_frames
         INNER JOIN raw_evidence ON raw_evidence.evidence_id = decoded_frames.evidence_id
         WHERE raw_evidence.captured_at >= ?1
@@ -2802,54 +2802,12 @@ fn query_decoded_packet_family_counts(
           {session_clause}
         "#
     ))?;
-    let rows = statement.query_map([start, end], |row| {
-        Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
-    })?;
+    let rows = statement.query_map([start, end], |row| row.get::<_, String>(0))?;
     let mut counts = BTreeMap::new();
     for row in rows {
-        let (packet_type_name, parsed_payload_json) = row?;
-        let family =
-            decoded_packet_family(packet_type_name.as_deref(), parsed_payload_json.as_str());
-        *counts.entry(family).or_insert(0) += 1;
+        *counts.entry(row?).or_insert(0) += 1;
     }
     Ok(counts)
-}
-
-fn decoded_packet_family(packet_type_name: Option<&str>, parsed_payload_json: &str) -> String {
-    let parsed_payload = serde_json::from_str::<Value>(parsed_payload_json).ok();
-    let packet_k = parsed_payload
-        .as_ref()
-        .and_then(|payload| payload.get("packet_k"))
-        .and_then(Value::as_u64);
-    let domain = parsed_payload
-        .as_ref()
-        .and_then(|payload| str_field(payload, &["domain"]));
-    let body_summary_kind = parsed_payload
-        .as_ref()
-        .and_then(|payload| payload.get("body_summary"))
-        .and_then(|body| str_field(body, &["kind"]));
-    if let Some(packet_k) = packet_k {
-        if let Some(domain) = domain.as_deref().filter(|value| !value.trim().is_empty()) {
-            return format!("K{packet_k}/{domain}");
-        }
-        if let Some(kind) = body_summary_kind
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            return format!("K{packet_k}/{kind}");
-        }
-        return format!("K{packet_k}");
-    }
-    packet_type_name
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("unknown")
-        .to_string()
-}
-
-fn str_field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| value.get(*key).and_then(Value::as_str))
-        .map(str::to_string)
 }
 
 fn capture_session_sql_list(capture_session_ids: &[String]) -> String {

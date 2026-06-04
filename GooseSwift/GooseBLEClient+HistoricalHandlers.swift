@@ -319,6 +319,20 @@ extension GooseBLEClient {
         title: "event",
         body: "\(lastHighFrequencyHistorySyncEvent) body=\(Data(eventBody).hexString) payload=\(Data(payload).hexString)"
       )
+      // The strap auto-disables HIGH_FREQ_SYNC every ~2 hours. Immediately
+      // re-arm so K12/K24 raw_sensor_history packets keep flowing (PPG,
+      // SpO2 ADC, skin_contact, signal_quality, full RR series). The 3s
+      // delay gives the firmware a beat between sessions.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+        guard let self,
+              self.connectionState == "ready",
+              !self.highFrequencyHistorySyncActive else { return }
+        self.record(
+          source: "ble.high_frequency_sync",
+          title: "auto_arm.after_disabled"
+        )
+        self.enterHighFrequencyHistorySync()
+      }
     case 100:
       let reason = eventBody.count >= 2 ? hapticsTerminationName(eventBody[1]) : "unknown"
       alarmCommandStatus = "Haptics terminated: \(reason)"

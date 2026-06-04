@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 16;
+pub const CURRENT_SCHEMA_VERSION: i64 = 19;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -211,9 +211,9 @@ pub struct DecodedFrameRow {
     pub packet_type_name: Option<String>,
     pub sequence: Option<i64>,
     pub command_or_event: Option<i64>,
-    pub parsed_payload_json: String,
     pub parser_version: String,
     pub warnings_json: String,
+    pub packet_family: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -962,9 +962,9 @@ impl GooseStore {
                 packet_type_name TEXT,
                 sequence INTEGER,
                 command_or_event INTEGER,
-                parsed_payload_json TEXT NOT NULL DEFAULT 'null',
                 parser_version TEXT NOT NULL,
                 warnings_json TEXT NOT NULL,
+                packet_family TEXT,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );
 
@@ -1517,6 +1517,124 @@ impl GooseStore {
             CREATE INDEX IF NOT EXISTS idx_sleep_audio_events_started_at
                 ON sleep_audio_events(started_at_ms);
 
+            -- One row per STRAP_CONDITION_REPORT (~every 10 minutes). The
+            -- band reports byte 10 = 0x01 when worn, 0x00 when off-body.
+            -- Used to filter off-wrist samples from HR/HRV/sleep analyses.
+            CREATE TABLE IF NOT EXISTS strap_worn_samples (
+                captured_at_ms INTEGER PRIMARY KEY,
+                worn INTEGER NOT NULL,  -- 0 or 1
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_strap_worn_samples_captured_at
+                ON strap_worn_samples(captured_at_ms);
+
+            -- Every strap event mirrored to a typed table. Includes the
+            -- decoded event_id + event_name, the embedded packet
+            -- timestamp, and the raw data bytes. Specific event types
+            -- (STRAP_CONDITION_REPORT, BATTERY_LEVEL, CHARGING_ON/OFF,
+            -- WRIST_OFF, etc.) get their fields promoted to columns; the
+            -- rest stay in data_hex for later decode.
+            CREATE TABLE IF NOT EXISTS strap_events (
+                event_uid TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                event_id INTEGER,
+                event_name TEXT,
+                timestamp_seconds INTEGER,
+                timestamp_subseconds INTEGER,
+                worn INTEGER,
+                battery_pct INTEGER,
+                data_hex TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_strap_events_captured_at
+                ON strap_events(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_strap_events_by_id
+                ON strap_events(event_id);
+
+            -- K26 'pulse_information_packet' samples, 24 i16 LE per
+            -- packet. Mirrors raw_r17_packets / raw_imu_packets.
+            CREATE TABLE IF NOT EXISTS raw_k26_packets (
+                packet_id TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                counter INTEGER,
+                sample_count INTEGER,
+                samples_blob BLOB NOT NULL,
+                source TEXT NOT NULL,
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_raw_k26_captured_at
+                ON raw_k26_packets(captured_at_ms);
+
+            -- Firmware console-log lines from the strap, decoded best-
+            -- effort. data_hex is preserved so we can re-parse later if
+            -- the line format changes.
+            CREATE TABLE IF NOT EXISTS console_logs (
+                log_uid TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                level TEXT,
+                text TEXT,
+                data_hex TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_console_logs_captured_at
+                ON console_logs(captured_at_ms);
+
+            -- METADATA packets (type 49) — keep the raw bytes + the
+            -- per-packet timestamp so future decoders can analyse them.
+            CREATE TABLE IF NOT EXISTS metadata_packets (
+                packet_uid TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                packet_type INTEGER NOT NULL,
+                data_hex TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_metadata_packets_captured_at
+                ON metadata_packets(captured_at_ms);
+
+            -- Catch-all safety net. In steady state this table should be
+            -- empty -- every known packet type the strap sends has a
+            -- dedicated typed mirror (hr_samples, sensor_samples,
+            -- raw_imu_packets, raw_r17_packets, raw_k26_packets,
+            -- strap_events, strap_commands, command_responses,
+            -- metadata_packets, console_logs, hrv_samples). Anything
+            -- landing here is by definition a packet type we don't
+            -- recognise yet, which is a signal to add a typed table.
+            CREATE TABLE IF NOT EXISTS raw_packet_bodies (
+                packet_uid TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                packet_type INTEGER NOT NULL,
+                packet_type_name TEXT,
+                sequence INTEGER,
+                command_or_event INTEGER,
+                payload_hex TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_raw_packet_bodies_captured_at
+                ON raw_packet_bodies(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_raw_packet_bodies_packet_type
+                ON raw_packet_bodies(packet_type);
+
+            -- Typed mirror for every COMMAND_RESPONSE (type 36) packet.
+            -- The protocol parser produces (response_to_command,
+            -- origin_sequence, result_code, data_hex); we surface them
+            -- here so command audit / debugging can query without
+            -- parsing JSON.
+            CREATE TABLE IF NOT EXISTS command_responses (
+                response_uid TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                response_to_command INTEGER,
+                response_to_command_name TEXT,
+                origin_sequence INTEGER,
+                result_code INTEGER,
+                data_hex TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_command_responses_captured_at
+                ON command_responses(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_command_responses_command
+                ON command_responses(response_to_command);
+
             CREATE TABLE IF NOT EXISTS raw_r17_packets (
                 packet_id TEXT PRIMARY KEY,
                 captured_at_ms INTEGER NOT NULL,
@@ -1572,10 +1690,68 @@ impl GooseStore {
 
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (16);
             PRAGMA user_version = 16;
+
+            -- v17: close the typed-mirror gaps. Every packet variant the
+            -- protocol parser knows about now has its own typed table:
+            --   * COMMAND (35) + PUFFIN_COMMAND (37) -> strap_commands
+            --   * PUFFIN_COMMAND_RESPONSE (38) shares command_responses
+            --     (distinguished by the new packet_type column)
+            --   * RELATIVE_PUFFIN_EVENTS (53) + PUFFIN_EVENTS_FROM_STRAP
+            --     (54) share strap_events (new packet_type column)
+            --   * RELATIVE_BATTERY_PACK_CONSOLE_LOGS (55) shares
+            --     console_logs (new packet_type column)
+            -- raw_packet_bodies is now reserved for genuinely unknown
+            -- packet types, not a permanent home for known ones.
+            CREATE TABLE IF NOT EXISTS strap_commands (
+                command_uid TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                packet_type INTEGER NOT NULL,
+                command INTEGER,
+                command_name TEXT,
+                sequence INTEGER,
+                data_hex TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_strap_commands_captured_at
+                ON strap_commands(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_strap_commands_command
+                ON strap_commands(command);
+            CREATE INDEX IF NOT EXISTS idx_strap_commands_packet_type
+                ON strap_commands(packet_type);
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (17);
+            PRAGMA user_version = 17;
+
+            -- v18: typed packet_family column on decoded_frames. Computed
+            -- once at insert time from the ParsedPayload so downstream
+            -- queries (capture correlation, manifest scaffolding, local
+            -- health validation) don't have to JSON-introspect or
+            -- re-parse payload_hex at query time. ensure_decoded_frame_columns
+            -- adds the column for already-migrated databases.
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (18);
+            PRAGMA user_version = 18;
+
+            -- v19: drop the decoded_frames.parsed_payload_json column.
+            -- The typed mirror tables hold every decoded field and the
+            -- packet_family column tells downstream queries the group-by
+            -- key. payload_hex is preserved as the canonical raw evidence;
+            -- callers that need the structured payload re-parse it via
+            -- protocol::parsed_payload_from_payload_hex(). The ALTER TABLE
+            -- DROP COLUMN below is executed unconditionally on every
+            -- migration pass; SQLite ignores it if the column is already
+            -- gone.
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (19);
+            PRAGMA user_version = 19;
             "#,
         )?;
+        self.drop_decoded_frame_parsed_payload_json_column()?;
         self.ensure_raw_evidence_columns()?;
         self.ensure_decoded_frame_columns()?;
+        self.ensure_strap_events_columns()?;
+        self.ensure_command_responses_columns()?;
+        self.ensure_console_logs_columns()?;
         self.ensure_algorithm_definition_columns()?;
         self.ensure_daily_activity_metric_multi_row_source_kind()?;
         self.ensure_daily_recovery_metric_multi_row_source_kind()?;
@@ -2059,10 +2235,21 @@ impl GooseStore {
         validate_required("evidence_id", input.evidence_id)?;
         validate_required("parser_version", input.parser_version)?;
 
-        let parsed_payload_json = serde_json::to_string(&input.parsed.parsed_payload)
-            .map_err(|error| GooseError::message(error.to_string()))?;
+        // parsed_payload_json has been retired (v19): the typed mirror
+        // tables (hr_samples, sensor_samples, raw_imu_packets,
+        // raw_r17_packets, raw_k26_packets, strap_events, strap_commands,
+        // command_responses, metadata_packets, console_logs, hrv_samples)
+        // are the canonical store for every decoded field, and
+        // packet_family on this row gives downstream queries the
+        // group-by key. payload_hex is the canonical raw evidence -- any
+        // future caller that needs the structured ParsedPayload re-parses
+        // it via protocol::parsed_payload_from_payload_hex().
         let warnings_json = serde_json::to_string(&input.parsed.warnings)
             .map_err(|error| GooseError::message(error.to_string()))?;
+        let packet_family = packet_family_from_parsed(
+            input.parsed.packet_type_name.as_deref(),
+            input.parsed.parsed_payload.as_ref(),
+        );
 
         let mut statement = self.conn.prepare_cached(
             r#"
@@ -2081,9 +2268,9 @@ impl GooseStore {
                 packet_type_name,
                 sequence,
                 command_or_event,
-                parsed_payload_json,
                 parser_version,
-                warnings_json
+                warnings_json,
+                packet_family
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
             "#,
         )?;
@@ -2102,9 +2289,9 @@ impl GooseStore {
             input.parsed.packet_type_name,
             input.parsed.sequence.map(i64::from),
             input.parsed.command_or_event.map(i64::from),
-            parsed_payload_json,
             input.parser_version,
-            warnings_json
+            warnings_json,
+            packet_family,
         ])?;
 
         // Side-effect: mirror any HR byte in this frame into hr_samples so
@@ -2125,6 +2312,272 @@ impl GooseStore {
                 params![sample_id, captured_at_ms, bpm],
             );
         }
+        // Side-effect: mirror every event-shaped packet into the
+        // strap_events typed table. Covers EVENT (48),
+        // RELATIVE_PUFFIN_EVENTS (53), and PUFFIN_EVENTS_FROM_STRAP (54)
+        // -- the protocol parser produces the same Event variant for
+        // all three; the packet_type column disambiguates downstream.
+        // STRAP_CONDITION_REPORT.worn (event 29 on a type-48 packet)
+        // additionally lands in strap_worn_samples (downstream off-
+        // wrist filter wants a thin (timestamp, worn) index without
+        // the full event record).
+        if changed > 0
+            && let Some(payload) = input.parsed.parsed_payload.as_ref()
+            && let crate::protocol::ParsedPayload::Event {
+                event_id,
+                event_name,
+                timestamp_seconds,
+                timestamp_subseconds,
+                data_hex,
+                worn,
+                battery_pct,
+                ..
+            } = payload
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let event_uid = format!("evt.{}.{}", input.frame_id, captured_at_ms);
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO strap_events
+                   (event_uid, captured_at_ms, packet_type, event_id,
+                    event_name, timestamp_seconds, timestamp_subseconds,
+                    worn, battery_pct, data_hex)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    event_uid,
+                    captured_at_ms,
+                    input.parsed.packet_type.map(i64::from),
+                    event_id.map(i64::from),
+                    event_name.as_deref(),
+                    timestamp_seconds.map(i64::from),
+                    timestamp_subseconds.map(i64::from),
+                    worn.map(|w| if w { 1_i64 } else { 0_i64 }),
+                    battery_pct.map(i64::from),
+                    data_hex,
+                ],
+            );
+            if input.parsed.packet_type == Some(crate::protocol::PACKET_TYPE_EVENT)
+                && event_id.map(|id| id == 29).unwrap_or(false)
+                && let Some(is_worn) = *worn
+            {
+                let _ = self.conn.execute(
+                    "INSERT OR IGNORE INTO strap_worn_samples (captured_at_ms, worn)
+                     VALUES (?1, ?2)",
+                    params![captured_at_ms, if is_worn { 1_i64 } else { 0_i64 }],
+                );
+            }
+        }
+
+        // Side-effect: mirror K26 pulse_information packet samples into
+        // raw_k26_packets so downstream analysis doesn't have to JSON-
+        // extract them out of decoded_frames.
+        if changed > 0
+            && let Some(payload) = input.parsed.parsed_payload.as_ref()
+            && let crate::protocol::ParsedPayload::DataPacket {
+                packet_k: Some(26),
+                body_summary:
+                    Some(crate::protocol::DataPacketBodySummary::PulseInformation {
+                        counter,
+                        samples,
+                        ..
+                    }),
+                ..
+            } = payload
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let packet_id = format!("k26.{}.{}", input.frame_id, captured_at_ms);
+            let mut blob = Vec::with_capacity(samples.len() * 2);
+            for sample in samples {
+                blob.extend_from_slice(&sample.to_le_bytes());
+            }
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO raw_k26_packets
+                   (packet_id, captured_at_ms, counter, sample_count,
+                    samples_blob, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'decoded_frames.live')",
+                params![
+                    packet_id,
+                    captured_at_ms,
+                    counter.map(i64::from),
+                    samples.len() as i64,
+                    blob,
+                ],
+            );
+        }
+
+        // Side-effect: mirror CONSOLE_LOGS (50) and
+        // RELATIVE_BATTERY_PACK_CONSOLE_LOGS (55) into the console_logs
+        // typed table. Best-effort UTF-8 decode of the body hex; raw
+        // bytes always preserved in data_hex for re-parsing. packet_type
+        // discriminates strap-firmware logs from battery-pack logs.
+        if changed > 0
+            && matches!(
+                input.parsed.packet_type,
+                Some(crate::protocol::PACKET_TYPE_CONSOLE_LOGS)
+                    | Some(crate::protocol::PACKET_TYPE_RELATIVE_BATTERY_PACK_CONSOLE_LOGS)
+            )
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let body_hex = input.parsed.payload_hex.as_str();
+            let text = hex::decode(body_hex)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok());
+            let log_uid = format!("log.{}.{}", input.frame_id, captured_at_ms);
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO console_logs
+                   (log_uid, captured_at_ms, packet_type, level, text, data_hex)
+                 VALUES (?1, ?2, ?3, NULL, ?4, ?5)",
+                params![
+                    log_uid,
+                    captured_at_ms,
+                    input.parsed.packet_type.map(i64::from),
+                    text,
+                    body_hex,
+                ],
+            );
+        }
+
+        // Side-effect: mirror METADATA and PUFFIN_METADATA packets so
+        // their bytes are queryable without scanning decoded_frames.
+        if changed > 0
+            && matches!(
+                input.parsed.packet_type,
+                Some(crate::protocol::PACKET_TYPE_METADATA)
+                    | Some(crate::protocol::PACKET_TYPE_PUFFIN_METADATA)
+            )
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let packet_uid = format!("meta.{}.{}", input.frame_id, captured_at_ms);
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO metadata_packets
+                   (packet_uid, captured_at_ms, packet_type, data_hex)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    packet_uid,
+                    captured_at_ms,
+                    input.parsed.packet_type.unwrap_or(0) as i64,
+                    input.parsed.payload_hex,
+                ],
+            );
+        }
+
+        // Side-effect: mirror COMMAND_RESPONSE (36) and
+        // PUFFIN_COMMAND_RESPONSE (38) into command_responses, with
+        // response_to_command + result_code surfaced as columns and
+        // packet_type discriminating which response stream this is.
+        if changed > 0
+            && let Some(payload) = input.parsed.parsed_payload.as_ref()
+            && let crate::protocol::ParsedPayload::CommandResponse {
+                response_to_command,
+                response_to_command_name,
+                origin_sequence,
+                result_code,
+                data_hex,
+                ..
+            } = payload
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let response_uid = format!("cmdresp.{}.{}", input.frame_id, captured_at_ms);
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO command_responses
+                   (response_uid, captured_at_ms, packet_type,
+                    response_to_command, response_to_command_name,
+                    origin_sequence, result_code, data_hex)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    response_uid,
+                    captured_at_ms,
+                    input.parsed.packet_type.map(i64::from),
+                    response_to_command.map(i64::from),
+                    response_to_command_name.as_deref(),
+                    origin_sequence.map(i64::from),
+                    result_code.map(i64::from),
+                    data_hex,
+                ],
+            );
+        }
+
+        // Side-effect: mirror COMMAND (35) and PUFFIN_COMMAND (37) into
+        // strap_commands. Commands carry the opcode + an optional
+        // payload; capturing them lets us audit what the phone asked the
+        // strap to do without parsing JSON.
+        if changed > 0
+            && let Some(payload) = input.parsed.parsed_payload.as_ref()
+            && let crate::protocol::ParsedPayload::Command {
+                command,
+                command_name,
+                data_hex,
+                ..
+            } = payload
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let command_uid = format!("cmd.{}.{}", input.frame_id, captured_at_ms);
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO strap_commands
+                   (command_uid, captured_at_ms, packet_type, command,
+                    command_name, sequence, data_hex)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    command_uid,
+                    captured_at_ms,
+                    input.parsed.packet_type.map(i64::from),
+                    command.map(i64::from),
+                    command_name.as_deref(),
+                    input.parsed.sequence.map(i64::from),
+                    data_hex,
+                ],
+            );
+        }
+
+        // Side-effect: catch-all safety net for genuinely unknown packet
+        // types. Every known type has its own typed mirror above; this
+        // block should not fire in steady state. If rows show up here,
+        // it means the strap sent us a packet type we haven't typed yet
+        // -- add a dedicated table.
+        if changed > 0
+            && let Some(packet_type) = input.parsed.packet_type
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            use crate::protocol::*;
+            let already_mirrored = matches!(
+                packet_type,
+                PACKET_TYPE_COMMAND
+                    | PACKET_TYPE_PUFFIN_COMMAND
+                    | PACKET_TYPE_COMMAND_RESPONSE
+                    | PACKET_TYPE_PUFFIN_COMMAND_RESPONSE
+                    | PACKET_TYPE_EVENT
+                    | PACKET_TYPE_RELATIVE_PUFFIN_EVENTS
+                    | PACKET_TYPE_PUFFIN_EVENTS_FROM_STRAP
+                    | PACKET_TYPE_REALTIME_DATA
+                    | PACKET_TYPE_REALTIME_RAW_DATA
+                    | PACKET_TYPE_HISTORICAL_DATA
+                    | PACKET_TYPE_REALTIME_IMU_DATA_STREAM
+                    | PACKET_TYPE_HISTORICAL_IMU_DATA_STREAM
+                    | PACKET_TYPE_METADATA
+                    | PACKET_TYPE_PUFFIN_METADATA
+                    | PACKET_TYPE_CONSOLE_LOGS
+                    | PACKET_TYPE_RELATIVE_BATTERY_PACK_CONSOLE_LOGS
+            );
+            if !already_mirrored {
+                let packet_uid = format!("raw.{}.{}", input.frame_id, captured_at_ms);
+                let _ = self.conn.execute(
+                    "INSERT OR IGNORE INTO raw_packet_bodies
+                       (packet_uid, captured_at_ms, packet_type,
+                        packet_type_name, sequence, command_or_event,
+                        payload_hex)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        packet_uid,
+                        captured_at_ms,
+                        packet_type as i64,
+                        input.parsed.packet_type_name.as_deref(),
+                        input.parsed.sequence.map(i64::from),
+                        input.parsed.command_or_event.map(i64::from),
+                        input.parsed.payload_hex,
+                    ],
+                );
+            }
+        }
+
         Ok(changed > 0)
     }
 
@@ -4907,9 +5360,9 @@ impl GooseStore {
                 decoded_frames.packet_type_name,
                 decoded_frames.sequence,
                 decoded_frames.command_or_event,
-                decoded_frames.parsed_payload_json,
                 decoded_frames.parser_version,
-                decoded_frames.warnings_json
+                decoded_frames.warnings_json,
+                decoded_frames.packet_family
             FROM decoded_frames
             INNER JOIN raw_evidence
                 ON raw_evidence.evidence_id = decoded_frames.evidence_id
@@ -4944,9 +5397,9 @@ impl GooseStore {
                     decoded_frames.packet_type_name,
                     decoded_frames.sequence,
                     decoded_frames.command_or_event,
-                    decoded_frames.parsed_payload_json,
                     decoded_frames.parser_version,
-                    decoded_frames.warnings_json
+                    decoded_frames.warnings_json,
+                    decoded_frames.packet_family
                 FROM decoded_frames
                 INNER JOIN raw_evidence
                     ON raw_evidence.evidence_id = decoded_frames.evidence_id
@@ -6204,19 +6657,76 @@ impl GooseStore {
         Ok(())
     }
 
+    fn drop_decoded_frame_parsed_payload_json_column(&self) -> GooseResult<()> {
+        let columns = self.table_columns_unchecked("decoded_frames")?;
+        if columns.contains("parsed_payload_json") {
+            self.conn.execute(
+                "ALTER TABLE decoded_frames DROP COLUMN parsed_payload_json",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
     fn ensure_decoded_frame_columns(&self) -> GooseResult<()> {
         let columns = self.table_columns_unchecked("decoded_frames")?;
         for (column, ddl) in [
             ("packet_type_name", "packet_type_name TEXT"),
-            (
-                "parsed_payload_json",
-                "parsed_payload_json TEXT NOT NULL DEFAULT 'null'",
-            ),
+            ("packet_family", "packet_family TEXT"),
         ] {
             if !columns.contains(column) {
                 self.conn
                     .execute(&format!("ALTER TABLE decoded_frames ADD COLUMN {ddl}"), [])?;
             }
+        }
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_decoded_frames_packet_family ON decoded_frames(packet_family)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn ensure_strap_events_columns(&self) -> GooseResult<()> {
+        let columns = self.table_columns_unchecked("strap_events")?;
+        if !columns.contains("packet_type") {
+            self.conn.execute(
+                "ALTER TABLE strap_events ADD COLUMN packet_type INTEGER",
+                [],
+            )?;
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_strap_events_packet_type ON strap_events(packet_type)",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn ensure_command_responses_columns(&self) -> GooseResult<()> {
+        let columns = self.table_columns_unchecked("command_responses")?;
+        if !columns.contains("packet_type") {
+            self.conn.execute(
+                "ALTER TABLE command_responses ADD COLUMN packet_type INTEGER",
+                [],
+            )?;
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_responses_packet_type ON command_responses(packet_type)",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn ensure_console_logs_columns(&self) -> GooseResult<()> {
+        let columns = self.table_columns_unchecked("console_logs")?;
+        if !columns.contains("packet_type") {
+            self.conn.execute(
+                "ALTER TABLE console_logs ADD COLUMN packet_type INTEGER",
+                [],
+            )?;
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_console_logs_packet_type ON console_logs(packet_type)",
+                [],
+            )?;
         }
         Ok(())
     }
@@ -6635,6 +7145,14 @@ fn value_contains_official_whoop_label_marker(value: &Value) -> bool {
 
 fn is_official_whoop_label_token(value: &str) -> bool {
     let normalized = normalized_marker(value);
+    // The policy declaration string itself is an *anti*-marker: it asserts
+    // that WHOOP values are treated as validation labels, NOT inputs. The
+    // step-motion estimator and other writers stamp it into inputs_json to
+    // document the policy, so flagging it here would mis-fire on every
+    // policy-compliant write.
+    if normalized == "official_whoop_values_are_validation_labels_not_inputs" {
+        return false;
+    }
     matches!(
         normalized.as_str(),
         "whoop"
@@ -7387,9 +7905,9 @@ fn decoded_frame_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DecodedFr
         packet_type_name: row.get(12)?,
         sequence: row.get(13)?,
         command_or_event: row.get(14)?,
-        parsed_payload_json: row.get(15)?,
-        parser_version: row.get(16)?,
-        warnings_json: row.get(17)?,
+        parser_version: row.get(15)?,
+        warnings_json: row.get(16)?,
+        packet_family: row.get(17)?,
     })
 }
 
@@ -7439,12 +7957,83 @@ fn bool_to_i64(value: bool) -> i64 {
 /// `heart_rate` (K10, K21). Returns None when no HR byte is in the frame.
 /// Used by `insert_decoded_frame` to mirror HR into `hr_samples` as a
 /// side-effect.
+/// Compute the packet family label (e.g. "K10/raw_motion_stream_result",
+/// "K11/raw_stream_counted", "EVENT") from a freshly-parsed payload. Stored
+/// alongside the row in `decoded_frames.packet_family` so manifest scaffolding,
+/// capture correlation, and local health validation can group by family with
+/// a plain SELECT instead of re-parsing payload_hex or JSON-introspecting
+/// `parsed_payload_json`.
+fn packet_family_from_parsed(
+    packet_type_name: Option<&str>,
+    parsed: Option<&crate::protocol::ParsedPayload>,
+) -> Option<String> {
+    use crate::protocol::ParsedPayload;
+    if let Some(ParsedPayload::DataPacket {
+        packet_k: Some(packet_k),
+        domain,
+        body_summary,
+        ..
+    }) = parsed
+    {
+        let suffix = domain
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| match body_summary {
+                Some(crate::protocol::DataPacketBodySummary::NormalHistory { .. }) => {
+                    Some("normal_history".to_string())
+                }
+                Some(crate::protocol::DataPacketBodySummary::R17OpticalOrLabradorFiltered {
+                    ..
+                }) => Some("r17_optical_or_labrador_filtered".to_string()),
+                Some(crate::protocol::DataPacketBodySummary::RawMotionK10 { .. }) => {
+                    Some("raw_motion_k10".to_string())
+                }
+                Some(crate::protocol::DataPacketBodySummary::RawMotionK21 { .. }) => {
+                    Some("raw_motion_k21".to_string())
+                }
+                Some(crate::protocol::DataPacketBodySummary::RawSensorHistory { .. }) => {
+                    Some("raw_sensor_history".to_string())
+                }
+                Some(crate::protocol::DataPacketBodySummary::PulseInformation { .. }) => {
+                    Some("pulse_information".to_string())
+                }
+                None => None,
+            });
+        return Some(match suffix {
+            Some(suffix) => format!("K{packet_k}/{suffix}"),
+            None => format!("K{packet_k}"),
+        });
+    }
+    packet_type_name
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
 fn extract_hr_bpm_from_payload(payload: &crate::protocol::ParsedPayload) -> Option<i64> {
-    let value = serde_json::to_value(payload).ok()?;
-    let body = value.get("body_summary")?;
-    body.get("heart_rate_bpm")
-        .and_then(|v| v.as_i64())
-        .or_else(|| body.get("heart_rate").and_then(|v| v.as_i64()))
+    use crate::protocol::{DataPacketBodySummary, ParsedPayload};
+    let ParsedPayload::DataPacket {
+        body_summary: Some(body),
+        ..
+    } = payload
+    else {
+        return None;
+    };
+    match body {
+        DataPacketBodySummary::NormalHistory {
+            heart_rate_bpm: Some(bpm),
+            ..
+        }
+        | DataPacketBodySummary::RawSensorHistory {
+            heart_rate_bpm: Some(bpm),
+            ..
+        } => Some(i64::from(*bpm)),
+        DataPacketBodySummary::RawMotionK10 {
+            heart_rate: Some(bpm),
+            ..
+        } => Some(i64::from(*bpm)),
+        _ => None,
+    }
 }
 
 fn i64_to_bool(value: i64) -> bool {

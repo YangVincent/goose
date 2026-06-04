@@ -916,33 +916,49 @@ fn bridge_exposes_command_definitions_for_device_and_debug_controls() {
 
 #[test]
 fn bridge_runs_ui_coverage_audit_for_debug_coverage_surface() {
+    // The original snapshot of the real WHOOP APK inventory
+    // (../apk-ui-inventory/coverage-map.json) is no longer in the repo.
+    // This test now points at a minimal synthetic inventory checked into
+    // tests/fixtures/ui-coverage/ so it still exercises the bridge end
+    // to end -- loads the coverage map, walks each CSV, hashes them,
+    // and reports pass=true when every surface has a matching rule.
+    let coverage_map_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/ui-coverage/coverage-map.json");
     let response = request(serde_json::json!({
         "schema": "goose.bridge.request.v1",
         "request_id": "ui-coverage-1",
         "method": "ui_coverage.audit",
-        "args": {}
+        "args": {
+            "coverage_map_path": coverage_map_path.to_string_lossy(),
+        }
     }));
 
     assert!(response.ok, "{:?}", response.error);
     let result = response.result.unwrap();
     assert_eq!(result["pass"], true);
-    assert_eq!(result["inventory"]["navigation_count"], 236);
-    assert_eq!(result["inventory"]["layout_count"], 1419);
-    assert_eq!(result["inventory"]["source_class_count"], 857);
+    assert_eq!(result["inventory"]["navigation_count"], 1);
+    assert_eq!(result["inventory"]["layout_count"], 1);
+    assert_eq!(result["inventory"]["ui_resource_count"], 1);
+    assert_eq!(result["inventory"]["source_class_count"], 1);
     assert_eq!(
         result["inventory"]["navigation_destinations_sha256"],
-        "e14d013399520ba43f23eb4f2556b8b98fa4d16733b56ead43b215a20b68014e"
+        "c18d3014bc38887f4820f50c11144ea303dc2814b7e0c504f029c97eb42706a2"
     );
     assert_eq!(
         result["inventory"]["layouts_sha256"],
-        "7fee602b72ea2963dff44a1112d10ebe9b4376a81f6836f1bd759049627d99c3"
+        "19760fb63747352255d64c6071217b8b823912b58cdc80b935569f014eacef77"
+    );
+    assert_eq!(
+        result["inventory"]["ui_resources_sha256"],
+        "9bb2b177e8c87b1026fbaada15f4d4fc660e16cb75d7bc977ac1009563af2e2a"
     );
     assert_eq!(
         result["inventory"]["source_ui_classes_sha256"],
-        "39e620e0d40012bf9f509c83ac48d81fc9893b01ad39dde531ac7dd49c40c6c5"
+        "3af6b522c35492b19f8890c34c4ee0adeb420557f2c21094c0e5cdf7a84f0781"
     );
     assert_eq!(result["navigation"]["missing_count"], 0);
     assert_eq!(result["layouts"]["missing_count"], 0);
+    assert_eq!(result["ui_resources"]["missing_count"], 0);
     assert_eq!(result["source_classes"]["missing_count"], 0);
     assert_eq!(result["has_deferred_review_debt"], false);
     assert_eq!(result["navigation"]["deferred_count"], 0);
@@ -8045,23 +8061,27 @@ fn bridge_scaffolds_local_health_validation_manifest_from_database() {
             provenance_json: r#"{"owned_capture":true}"#,
         })
         .unwrap();
-    for (evidence_id, captured_at, packet_k, domain, sequence) in [
+    // Manifest scaffolding groups by `decoded_frames.packet_family`, which
+    // is populated by `insert_decoded_frame` from the ParsedPayload at
+    // ingest time. These tests insert decoded_frames directly via SQL, so
+    // we set the family column explicitly here too.
+    for (evidence_id, captured_at, packet_k, sequence, packet_family) in [
         (
             "bridge-raw-walk-k10",
             "2026-06-02T10:00:30Z",
-            10,
-            "raw_motion_stream_result",
-            10,
+            10u8,
+            10u8,
+            "K10/raw_motion_stream_result",
         ),
         (
             "bridge-raw-walk-k11",
             "2026-06-02T10:04:30Z",
-            11,
-            "raw_stream_counted",
-            11,
+            11u8,
+            11u8,
+            "K11/raw_stream_counted",
         ),
     ] {
-        let payload = [packet_k as u8, sequence as u8];
+        let payload = [packet_k, sequence];
         store
             .insert_raw_evidence(RawEvidenceInput {
                 evidence_id,
@@ -8092,24 +8112,17 @@ fn bridge_scaffolds_local_health_validation_manifest_from_database() {
                     packet_type_name,
                     sequence,
                     command_or_event,
-                    parsed_payload_json,
                     parser_version,
-                    warnings_json
-                ) VALUES (?1, ?2, 'Goose', 2, 0, 2, '0000', '', 1, 1, ?3, 'DATA', ?4, NULL, ?5, 'test', '[]')
+                    warnings_json,
+                    packet_family
+                ) VALUES (?1, ?2, 'Goose', 2, 0, 2, '0000', '', 1, 1, ?3, 'DATA', ?4, NULL, 'test', '[]', ?5)
                 "#,
                 (
                     format!("frame-{evidence_id}"),
                     evidence_id,
                     i64::from(packet_k),
                     i64::from(sequence),
-                    serde_json::json!({
-                        "packet_k": packet_k,
-                        "domain": domain,
-                        "body_summary": {
-                            "kind": domain
-                        }
-                    })
-                    .to_string(),
+                    packet_family,
                 ),
             )
             .unwrap();

@@ -15,23 +15,26 @@ struct SleepDetailView: View {
   @ObservedObject private var sleepSession = SleepSessionStore.shared
 
   var body: some View {
-    ZStack {
-      WhoopHomeView.detailBackground.ignoresSafeArea()
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          hero
-          stageHypnogram
-          stageBreakdownCard
-          needVsActualCard
-          windowAndConsistencyCard
-          environmentCard
-          sleepSessionCard
-          sleepAudioCard
-          hrvCard
-          trendChart
+    GeometryReader { geo in
+      ZStack {
+        WhoopHomeView.detailBackground.ignoresSafeArea()
+        ScrollView(.vertical, showsIndicators: true) {
+          VStack(alignment: .leading, spacing: 20) {
+            hero
+            stageHypnogram
+            stageBreakdownCard
+            needVsActualCard
+            windowAndConsistencyCard
+            environmentCard
+            sleepSessionCard
+            sleepAudioCard
+            hrvCard
+            trendChart
+          }
+          .padding(.horizontal, 18)
+          .padding(.bottom, 32)
+          .frame(width: geo.size.width, alignment: .leading)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 32)
       }
     }
     .navigationTitle("Sleep")

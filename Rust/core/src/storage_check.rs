@@ -520,9 +520,9 @@ fn required_columns() -> BTreeMap<&'static str, Vec<&'static str>> {
             "packet_type_name",
             "sequence",
             "command_or_event",
-            "parsed_payload_json",
             "parser_version",
             "warnings_json",
+            "packet_family",
             "created_at",
         ],
     );

@@ -169,13 +169,7 @@ pub fn observability_timeline_from_rows(
 }
 
 fn timeline_row_from_decoded_frame(row: &DecodedFrameRow) -> GooseResult<PacketTimelineRow> {
-    let parsed_payload: Option<ParsedPayload> = serde_json::from_str(&row.parsed_payload_json)
-        .map_err(|error| {
-            GooseError::message(format!(
-                "{} parsed_payload_json invalid: {error}",
-                row.frame_id
-            ))
-        })?;
+    let parsed_payload = parsed_payload_from_payload_hex(row)?;
     let warnings = parse_warnings(row)?;
 
     let (category, title, device_timestamp_seconds, device_timestamp_subseconds, body_hex, summary) =
@@ -350,6 +344,10 @@ fn parse_warnings(row: &DecodedFrameRow) -> GooseResult<Vec<String>> {
     serde_json::from_str(&row.warnings_json).map_err(|error| {
         GooseError::message(format!("{} warnings_json invalid: {error}", row.frame_id))
     })
+}
+
+fn parsed_payload_from_payload_hex(row: &DecodedFrameRow) -> GooseResult<Option<ParsedPayload>> {
+    crate::protocol::parsed_payload_from_payload_hex(&row.payload_hex, &row.frame_id)
 }
 
 fn non_empty(value: String) -> Option<String> {

@@ -145,6 +145,8 @@ fn parses_event_header_and_preserves_unknown_event_body() {
             timestamp_subseconds: Some(0x0506),
             data_offset: 12,
             data_hex: "deadbeef".to_string(),
+            worn: None,
+            battery_pct: None,
             warnings: Vec::new(),
         })
     );
@@ -194,6 +196,10 @@ fn parses_history_packet_stable_header_and_hr_marker() {
                 hr_present: Some(true),
                 marker_offset: Some(14),
                 marker_value: Some(0x4d),
+                heart_rate_bpm: Some(0x4d),
+                spo2_pct: None,
+                rr_interval_ms: None,
+                accel_gravity: None,
             }),
             warnings: Vec::new(),
         })
@@ -223,6 +229,10 @@ fn normal_history_zero_hr_marker_is_not_treated_as_hr_present() {
                     hr_present: Some(false),
                     marker_offset: Some(17),
                     marker_value: Some(0),
+                    heart_rate_bpm: None,
+                    spo2_pct: None,
+                    rr_interval_ms: None,
+                    accel_gravity: None,
                 })
             );
         }
@@ -269,6 +279,7 @@ fn parses_r17_optical_body_offsets_and_signed_sample_stats() {
                         max: Some(1000),
                         sum: 200,
                         preview: vec![1000, -1000, 200],
+                        samples: vec![1000, -1000, 200],
                     }),
                     warnings: Vec::new(),
                 })
@@ -504,6 +515,10 @@ fn short_data_packets_preserve_raw_body_and_warn() {
                 hr_present: None,
                 marker_offset: Some(14),
                 marker_value: None,
+                heart_rate_bpm: None,
+                spo2_pct: None,
+                rr_interval_ms: None,
+                accel_gravity: None,
             }),
             warnings: vec![
                 "data_packet_header_too_short".to_string(),

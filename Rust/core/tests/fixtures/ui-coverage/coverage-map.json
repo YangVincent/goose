@@ -1,0 +1,59 @@
+{
+  "schema": "goose.ui-coverage-audit.v1",
+  "inventory": {
+    "navigation_destinations_csv": "navigation_destinations.csv",
+    "layouts_csv": "layouts.csv",
+    "ui_resources_csv": "ui_resources.csv",
+    "source_ui_classes_csv": "source_ui_classes.csv"
+  },
+  "expected_inventory": {
+    "navigation_count": 1,
+    "layout_count": 1,
+    "ui_resource_count": 1,
+    "source_class_count": 1,
+    "navigation_destinations_sha256": "c18d3014bc38887f4820f50c11144ea303dc2814b7e0c504f029c97eb42706a2",
+    "layouts_sha256": "19760fb63747352255d64c6071217b8b823912b58cdc80b935569f014eacef77",
+    "ui_resources_sha256": "9bb2b177e8c87b1026fbaada15f4d4fc660e16cb75d7bc977ac1009563af2e2a",
+    "source_ui_classes_sha256": "3af6b522c35492b19f8890c34c4ee0adeb420557f2c21094c0e5cdf7a84f0781"
+  },
+  "coverage": {
+    "navigation": [
+      {
+        "rule_id": "nav-test",
+        "graph": "test_graph",
+        "destination_id": "test_destination",
+        "status": "implement",
+        "goose_area": "test",
+        "target_level": "core"
+      }
+    ],
+    "layouts": [
+      {
+        "rule_id": "layout-test",
+        "resource": "activity_test",
+        "status": "implement",
+        "goose_area": "test",
+        "target_level": "core"
+      }
+    ],
+    "ui_resources": [
+      {
+        "rule_id": "resource-test",
+        "resource_type": "drawable",
+        "resource": "ic_test",
+        "status": "implement",
+        "goose_area": "test",
+        "target_level": "core"
+      }
+    ],
+    "source_classes": [
+      {
+        "rule_id": "class-test",
+        "class_name": "com.test.TestActivity",
+        "status": "implement",
+        "goose_area": "test",
+        "target_level": "core"
+      }
+    ]
+  }
+}

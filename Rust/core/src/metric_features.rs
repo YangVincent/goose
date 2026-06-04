@@ -3956,13 +3956,8 @@ fn issue_reason(issue: &str) -> &'static str {
 }
 
 fn motion_plan_from_row(row: &DecodedFrameRow) -> GooseResult<Option<MotionPlan>> {
-    let parsed_payload: Option<ParsedPayload> = serde_json::from_str(&row.parsed_payload_json)
-        .map_err(|error| {
-            GooseError::message(format!(
-                "{} parsed_payload_json invalid: {error}",
-                row.frame_id
-            ))
-        })?;
+    let parsed_payload =
+        crate::protocol::parsed_payload_from_payload_hex(&row.payload_hex, &row.frame_id)?;
     let Some(ParsedPayload::DataPacket {
         timestamp_seconds,
         timestamp_subseconds,
@@ -4041,12 +4036,7 @@ fn heart_rate_plan_from_row(row: &DecodedFrameRow) -> GooseResult<Option<HeartRa
 }
 
 fn parsed_payload_from_row(row: &DecodedFrameRow) -> GooseResult<Option<ParsedPayload>> {
-    serde_json::from_str(&row.parsed_payload_json).map_err(|error| {
-        GooseError::message(format!(
-            "{} parsed_payload_json invalid: {error}",
-            row.frame_id
-        ))
-    })
+    crate::protocol::parsed_payload_from_payload_hex(&row.payload_hex, &row.frame_id)
 }
 
 fn vital_event_plan_from_payload(parsed_payload: &Option<ParsedPayload>) -> Option<VitalEventPlan> {
@@ -4147,13 +4137,8 @@ fn respiratory_rate_plan_from_payload(
 }
 
 fn hrv_plan_from_row(row: &DecodedFrameRow) -> GooseResult<Option<HrvPlan>> {
-    let parsed_payload: Option<ParsedPayload> = serde_json::from_str(&row.parsed_payload_json)
-        .map_err(|error| {
-            GooseError::message(format!(
-                "{} parsed_payload_json invalid: {error}",
-                row.frame_id
-            ))
-        })?;
+    let parsed_payload =
+        crate::protocol::parsed_payload_from_payload_hex(&row.payload_hex, &row.frame_id)?;
     let Some(ParsedPayload::DataPacket {
         body_summary:
             Some(DataPacketBodySummary::R17OpticalOrLabradorFiltered {

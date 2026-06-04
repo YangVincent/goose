@@ -1,0 +1,9 @@
+{
+  "schema": "goose.fixture-index.v1",
+  "generated_by": "goose-fixture-index",
+  "fixture_root": "fixtures",
+  "pass": true,
+  "fixtures": [],
+  "issues": [],
+  "next_actions": []
+}

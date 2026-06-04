@@ -1,0 +1,2 @@
+class_name,category,module,path
+com.test.TestActivity,activity,test_module,src/main/kotlin/com/test/TestActivity.kt

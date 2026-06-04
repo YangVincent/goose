@@ -14,6 +14,13 @@ struct SleepDetailView: View {
   @ObservedObject private var audioRecorder = SleepAudioRecorder.shared
   @ObservedObject private var sleepSession = SleepSessionStore.shared
 
+  /// Loaded asynchronously by `refreshReading()` against the latest
+  /// PastSession (or, failing that, the detected sleep window). Drives
+  /// the SLEEP READING card.
+  @State private var reading: SleepReadingSnapshot?
+  @State private var readingLoading: Bool = false
+  @State private var readingError: String?
+
   var body: some View {
     GeometryReader { geo in
       ZStack {
@@ -21,6 +28,7 @@ struct SleepDetailView: View {
         ScrollView(.vertical, showsIndicators: true) {
           VStack(alignment: .leading, spacing: 20) {
             hero
+            sleepReadingCard
             stageHypnogram
             stageBreakdownCard
             needVsActualCard
@@ -50,9 +58,17 @@ struct SleepDetailView: View {
         await importedStore.bootstrapIfNeeded(databasePath: HealthDataStore.defaultDatabasePath())
       }
       audioRecorder.reloadRecentEvents()
+      refreshReading()
     }
     .onChange(of: selectedDay.currentDate) { _, _ in
       refreshForCurrentDate()
+      refreshReading()
+    }
+    .onChange(of: sleepSession.pastSessions.first?.id) { _, _ in
+      refreshReading()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: SleepSessionStore.sleepReadingComputedNotification)) { _ in
+      refreshReading()
     }
   }
 
@@ -738,6 +754,211 @@ struct SleepDetailView: View {
     }
   }
 
+  // MARK: - Sleep reading (Rust-computed composite score)
+
+  /// Composite sleep reading for the latest session (or, failing that,
+  /// the auto-detected sleep window). Loaded asynchronously via the
+  /// Rust bridge; if no cached row exists, the card kicks off a
+  /// compute_reading call which persists for next time.
+  private var sleepReadingCard: some View {
+    cardSurface {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 6) {
+          Text("SLEEP READING")
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .tracking(2)
+            .foregroundStyle(.white.opacity(0.55))
+          sourceTag("RUST", color: Self.hrvAccent)
+          Spacer()
+          if readingLoading {
+            ProgressView()
+              .progressViewStyle(.circular)
+              .tint(.white.opacity(0.4))
+              .scaleEffect(0.6)
+          }
+        }
+        if let r = reading {
+          readingBody(r)
+        } else if let err = readingError {
+          Text(err)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(Self.redAccent.opacity(0.85))
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          Text("End a sleep session (or wear the strap overnight) and a composite reading shows up here.")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.4))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func readingBody(_ r: SleepReadingSnapshot) -> some View {
+    HStack(alignment: .lastTextBaseline, spacing: 6) {
+      Text(String(format: "%.0f", r.sleepScore))
+        .font(.system(size: 52, weight: .heavy, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(.white)
+      Text("/ 100")
+        .font(.system(size: 16, weight: .heavy, design: .rounded))
+        .foregroundStyle(.white.opacity(0.45))
+      Spacer()
+      VStack(alignment: .trailing, spacing: 2) {
+        Text(Self.formatMinutes(r.timeInBedMinutes))
+          .font(.system(size: 14, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+        Text("TIME IN BED")
+          .font(.system(size: 8, weight: .heavy, design: .rounded))
+          .tracking(1.5)
+          .foregroundStyle(.white.opacity(0.45))
+      }
+    }
+    LazyVGrid(columns: [
+      GridItem(.flexible(), alignment: .leading),
+      GridItem(.flexible(), alignment: .leading),
+      GridItem(.flexible(), alignment: .leading),
+    ], spacing: 10) {
+      subscoreCell("DURATION", r.durationScore)
+      subscoreCell("EFFICIENCY", r.efficiencyScore)
+      subscoreCell("DEPTH", r.depthScore)
+      subscoreCell("HRV", r.hrvScore)
+      subscoreCell("RESTFUL", r.restfulnessScore)
+    }
+    Divider().overlay(Color.white.opacity(0.1))
+    HStack(spacing: 14) {
+      kvCell(label: "ASLEEP", value: Self.formatMinutes(r.totalSleepMinutes))
+      kvCell(label: "DEEP", value: Self.formatMinutes(r.deepMinutes))
+      kvCell(label: "LIGHT", value: Self.formatMinutes(r.lightMinutes))
+      kvCell(label: "AWAKE", value: Self.formatMinutes(r.awakeMinutes))
+      Spacer(minLength: 0)
+    }
+    HStack(spacing: 14) {
+      kvCell(label: "EFF", value: String(format: "%.0f%%", r.efficiency * 100))
+      kvCell(label: "ONSET", value: r.onsetLatencyMinutes.map { "\($0) min" } ?? "—")
+      kvCell(label: "WASO", value: "\(r.wakeAfterSleepOnsetMinutes) min")
+      kvCell(label: "HR MEAN", value: r.hrMeanBpm.map { String(format: "%.0f", $0) } ?? "—")
+      kvCell(label: "HRV", value: String(format: "%.0f ms", r.hrvMeanRmssdMs))
+      Spacer(minLength: 0)
+    }
+  }
+
+  private func subscoreCell(_ label: String, _ value: Double) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(label)
+        .font(.system(size: 9, weight: .heavy, design: .rounded))
+        .tracking(1.5)
+        .foregroundStyle(.white.opacity(0.5))
+      HStack(alignment: .lastTextBaseline, spacing: 3) {
+        Text(String(format: "%.0f", value))
+          .font(.system(size: 16, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(scoreColor(value))
+        Text("/100")
+          .font(.system(size: 8, weight: .heavy, design: .rounded))
+          .foregroundStyle(.white.opacity(0.35))
+      }
+      GeometryReader { geo in
+        ZStack(alignment: .leading) {
+          Capsule().fill(Color.white.opacity(0.08)).frame(height: 3)
+          Capsule().fill(scoreColor(value))
+            .frame(width: geo.size.width * CGFloat(max(0, min(value, 100)) / 100), height: 3)
+        }
+      }
+      .frame(height: 3)
+    }
+  }
+
+  private func scoreColor(_ v: Double) -> Color {
+    if v >= 85 { return Self.greenAccent }
+    if v >= 70 { return Self.yellowAccent }
+    if v >= 50 { return Color(red: 1.0, green: 0.62, blue: 0.32) }
+    return Self.redAccent
+  }
+
+  private static func formatMinutes(_ minutes: Int) -> String {
+    let h = minutes / 60
+    let m = minutes % 60
+    return "\(h)h\(String(format: "%02d", m))m"
+  }
+
+  /// Decide which session to read against and dispatch the bridge call.
+  /// Order of preference: (1) the most recent SleepSessionStore PastSession,
+  /// (2) the auto-detected sleep window for the selected date. Falling
+  /// back to the detected window means "last night" still gets a reading
+  /// even if you went to bed without tapping Start.
+  private func refreshReading() {
+    if let last = sleepSession.pastSessions.first {
+      loadReading(
+        sessionID: last.id.uuidString,
+        startMs: Int64((last.startedAt.timeIntervalSince1970 * 1000).rounded()),
+        endMs: Int64((last.endedAt.timeIntervalSince1970 * 1000).rounded())
+      )
+    } else if let window = sleepStore.lastNight {
+      let key = Self.dateKeyForReading(window.onset)
+      loadReading(
+        sessionID: "auto-\(key)",
+        startMs: Int64((window.onset.timeIntervalSince1970 * 1000).rounded()),
+        endMs: Int64((window.wake.timeIntervalSince1970 * 1000).rounded())
+      )
+    } else {
+      reading = nil
+    }
+  }
+
+  private static func dateKeyForReading(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return f.string(from: date)
+  }
+
+  /// Try the cached row first (sleep.get_reading). If missing, compute
+  /// (which also upserts so the next open is instant).
+  private func loadReading(sessionID: String, startMs: Int64, endMs: Int64) {
+    readingError = nil
+    readingLoading = true
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    Task.detached(priority: .userInitiated) {
+      let bridge = GooseRustBridge()
+      let cached = try? bridge.request(
+        method: "sleep.get_reading",
+        args: ["database_path": dbPath, "session_id": sessionID]
+      )
+      if let cached, let snap = SleepReadingSnapshot.from(bridgeResponse: cached) {
+        await MainActor.run {
+          self.reading = snap
+          self.readingLoading = false
+        }
+        return
+      }
+      do {
+        let computed = try bridge.request(
+          method: "sleep.compute_reading",
+          args: [
+            "database_path": dbPath,
+            "session_id": sessionID,
+            "start_time_unix_ms": startMs,
+            "end_time_unix_ms": endMs,
+          ]
+        )
+        let snap = SleepReadingSnapshot.from(bridgeResponse: computed)
+        await MainActor.run {
+          self.reading = snap
+          self.readingLoading = false
+          if snap == nil { self.readingError = "Couldn't parse the sleep reading response." }
+        }
+      } catch {
+        await MainActor.run {
+          self.reading = nil
+          self.readingLoading = false
+          self.readingError = "Couldn't compute: \(error.localizedDescription)"
+        }
+      }
+    }
+  }
+
   // MARK: - Sleep session + detection log
 
   private var sleepSessionCard: some View {
@@ -1023,4 +1244,67 @@ struct SleepDetailView: View {
   private static let yellowAccent = Color(red: 1.0, green: 0.88, blue: 0.40)
   private static let redAccent = Color(red: 1.0, green: 0.37, blue: 0.42)
   private static let hrvAccent = Color(red: 0.55, green: 0.85, blue: 1.0)
+}
+
+/// Strongly-typed view of the bridge response from `sleep.compute_reading`
+/// and `sleep.get_reading`. Only the fields the SleepDetailView card
+/// actually renders are pulled out — extending it is cheap if the UI
+/// grows. Returns nil when the bridge returns null (no cached row) or
+/// when required fields are missing.
+struct SleepReadingSnapshot: Equatable {
+  let sleepScore: Double
+  let durationScore: Double
+  let efficiencyScore: Double
+  let depthScore: Double
+  let hrvScore: Double
+  let restfulnessScore: Double
+  let timeInBedMinutes: Int
+  let totalSleepMinutes: Int
+  let deepMinutes: Int
+  let lightMinutes: Int
+  let awakeMinutes: Int
+  let efficiency: Double
+  let onsetLatencyMinutes: Int?
+  let wakeAfterSleepOnsetMinutes: Int
+  let hrMeanBpm: Double?
+  let hrvMeanRmssdMs: Double
+
+  static func from(bridgeResponse dict: [String: Any]) -> SleepReadingSnapshot? {
+    // sleep.get_reading returns serde_json(None) = NSNull when there's
+    // no row; that arrives as an empty dict via the JSON-RPC bridge,
+    // OR with explicit `"is_null": true`. Either way, treat absence of
+    // sleep_score as "no reading".
+    guard let score = Self.double(dict["sleep_score"]) else { return nil }
+    return SleepReadingSnapshot(
+      sleepScore: score,
+      durationScore: Self.double(dict["duration_score"]) ?? 0,
+      efficiencyScore: Self.double(dict["efficiency_score"]) ?? 0,
+      depthScore: Self.double(dict["depth_score"]) ?? 0,
+      hrvScore: Self.double(dict["hrv_score"]) ?? 0,
+      restfulnessScore: Self.double(dict["restfulness_score"]) ?? 0,
+      timeInBedMinutes: Self.int(dict["time_in_bed_minutes"]) ?? 0,
+      totalSleepMinutes: Self.int(dict["total_sleep_minutes"]) ?? 0,
+      deepMinutes: Self.int(dict["deep_minutes"]) ?? 0,
+      lightMinutes: Self.int(dict["light_minutes"]) ?? 0,
+      awakeMinutes: Self.int(dict["awake_minutes"]) ?? 0,
+      efficiency: Self.double(dict["efficiency"]) ?? 0,
+      onsetLatencyMinutes: Self.int(dict["onset_latency_minutes"]),
+      wakeAfterSleepOnsetMinutes: Self.int(dict["wake_after_sleep_onset_minutes"]) ?? 0,
+      hrMeanBpm: Self.double(dict["hr_mean_bpm"]),
+      hrvMeanRmssdMs: Self.double(dict["hrv_mean_rmssd_ms"]) ?? 0
+    )
+  }
+
+  private static func double(_ v: Any?) -> Double? {
+    if let d = v as? Double { return d }
+    if let n = v as? NSNumber { return n.doubleValue }
+    if let i = v as? Int { return Double(i) }
+    return nil
+  }
+  private static func int(_ v: Any?) -> Int? {
+    if let i = v as? Int { return i }
+    if let n = v as? NSNumber { return n.intValue }
+    if let d = v as? Double { return Int(d) }
+    return nil
+  }
 }

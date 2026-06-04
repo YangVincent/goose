@@ -68,6 +68,9 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
+			F100000000000000000000D2 /* WhoopUI/CollapsibleSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */; };
+			F100000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */; };
+			F100000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */; };
 			F100000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift */; };
 			F100000000000000000000CE /* WhoopUI/DataRecoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CE /* WhoopUI/DataRecoveryView.swift */; };
 			F100000000000000000000CD /* WhoopUI/HRRecoveryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CD /* WhoopUI/HRRecoveryButton.swift */; };
@@ -257,6 +260,9 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/CollapsibleSection.swift; sourceTree = "<group>"; };
+			F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopTodayActivitiesCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopHeroDualRing.swift; sourceTree = "<group>"; };
 			F200000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StrainDebugOverlayToggle.swift; sourceTree = "<group>"; };
 			F200000000000000000000CE /* WhoopUI/DataRecoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/DataRecoveryView.swift; sourceTree = "<group>"; };
 			F200000000000000000000CD /* WhoopUI/HRRecoveryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/HRRecoveryButton.swift; sourceTree = "<group>"; };
@@ -570,6 +576,9 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
+				F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */,
+				F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */,
+				F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */,
 				F200000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift */,
 				F200000000000000000000CE /* WhoopUI/DataRecoveryView.swift */,
 				F200000000000000000000CD /* WhoopUI/HRRecoveryButton.swift */,
@@ -922,6 +931,9 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
+				F100000000000000000000D2 /* WhoopUI/CollapsibleSection.swift in Sources */,
+				F100000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift in Sources */,
+				F100000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift in Sources */,
 				F100000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift in Sources */,
 				F100000000000000000000CE /* WhoopUI/DataRecoveryView.swift in Sources */,
 				F100000000000000000000CD /* WhoopUI/HRRecoveryButton.swift in Sources */,

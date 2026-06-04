@@ -38,48 +38,41 @@ struct WhoopHomeView: View {
           dateStrip
             .padding(.top, 4)
 
-          WhoopTodaySection(client: client, activities: client.activities)
-
-          NavigationLink(value: WhoopMetric.recovery) {
-            recoveryRing
-          }
-          .buttonStyle(.plain)
-          .padding(.top, 4)
-
-          WhoopRecoveryBreakdownCard(client: client)
+          // Hero: recovery + strain rings side by side, with target band
+          // overlay on the strain ring. Tap routes to detail views.
+          heroDualRings
+            .padding(.top, 4)
             .padding(.horizontal, 18)
 
-          WhoopDayComparisonCard(client: client)
+          // Today's activities — sleep summary on top, completed workouts
+          // below. Tap a workout → WorkoutDetailView.
+          WhoopTodayActivitiesCard(client: client)
             .padding(.horizontal, 18)
 
-          DayHRTimelineCard(date: client.currentDate)
-            .padding(.horizontal, 18)
-
-          statGrid
-            .padding(.horizontal, 18)
-
-          NavigationLink(value: WhoopMetric.sleep) {
-            sleepCard
-          }
-          .buttonStyle(.plain)
-          .padding(.horizontal, 18)
-
+          // Sleep coach is high-value — moved up to be visible without
+          // scrolling past long-term trend cards.
           WhoopBedtimeRecommendationCard()
+            .padding(.horizontal, 18)
+
+          // Recovery factor breakdown — what's driving the recovery score.
+          WhoopRecoveryBreakdownCard(client: client)
             .padding(.horizontal, 18)
 
           WhoopSleepEnvironmentCard()
             .padding(.horizontal, 18)
 
-          NavigationLink(value: WhoopMetric.strain) {
-            strainCard
+          // Collapsible HR-all-day timeline + 2x3 stat grid.
+          CollapsibleSection(title: "HR ALL DAY", defaultOpen: false) {
+            DayHRTimelineCard(date: client.currentDate)
           }
-          .buttonStyle(.plain)
           .padding(.horizontal, 18)
 
-          WhoopStrainTargetCard(client: client)
-            .padding(.horizontal, 18)
+          CollapsibleSection(title: "VITALS", defaultOpen: false) {
+            statGrid
+          }
+          .padding(.horizontal, 18)
 
-          WhoopStrainRecoveryTrendCard(client: client)
+          WhoopDayComparisonCard(client: client)
             .padding(.horizontal, 18)
 
           WhoopHRMaxAdvisoryCard()
@@ -89,9 +82,6 @@ struct WhoopHomeView: View {
             .padding(.horizontal, 18)
 
           JournalEntryCard(date: client.currentDate)
-            .padding(.horizontal, 18)
-
-          WhoopWorkoutHomeCard(client: client)
             .padding(.horizontal, 18)
         }
         .padding(.bottom, 32)
@@ -260,6 +250,193 @@ struct WhoopHomeView: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .stroke(isToday ? Self.strainColor.opacity(0.6) : Color.clear, lineWidth: 1)
     )
+  }
+
+  /// Three-ring hero: sleep on left, recovery middle, strain right.
+  /// Matches WHOOP's home layout.
+  private var heroDualRings: some View {
+    let resolvedRecovery = resolvedRecoveryScore
+    let recoveryValue = resolvedRecovery.value
+    let recoveryColor = Self.recoveryColor(forPercent: recoveryValue)
+    let resolvedStrainTuple = resolvedStrain
+    let strainColor = Self.strainColor
+    let target = strainTarget(forRecovery: recoveryValue, isUnknown: resolvedRecovery.source == .none)
+    let resolvedSleep = resolvedSleepPerformance
+    return HStack(spacing: 16) {
+      Spacer(minLength: 0)
+      NavigationLink(value: WhoopMetric.sleep) {
+        sleepRingHero(
+          value: resolvedSleep.value,
+          source: resolvedSleep.source == .local ? "LOCAL" : (resolvedSleep.source == .none ? nil : nil)
+        )
+      }
+      .buttonStyle(.plain)
+      NavigationLink(value: WhoopMetric.recovery) {
+        recoveryRingHero(
+          value: resolvedRecovery.source == .none ? nil : recoveryValue,
+          color: recoveryColor,
+          source: resolvedRecovery.source == .local ? "LOCAL" : nil
+        )
+      }
+      .buttonStyle(.plain)
+      NavigationLink(value: WhoopMetric.strain) {
+        strainRingHero(
+          value: resolvedStrainTuple.value,
+          color: strainColor,
+          source: resolvedStrainTuple.source == .local ? "LOCAL" : nil,
+          targetMin: target.minimum,
+          targetMax: target.maximum,
+          targetLabel: target.label
+        )
+      }
+      .buttonStyle(.plain)
+      Spacer(minLength: 0)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private enum SleepSource {
+    case server
+    case local
+    case none
+  }
+
+  /// Sleep performance fallback chain: server stage summary % → detected
+  /// sleep-window perf × 100 → none.
+  private var resolvedSleepPerformance: (value: Int?, source: SleepSource) {
+    if let perf = client.currentDay?.sleep?.performance, perf > 0 {
+      return (Int(perf.rounded()), .server)
+    }
+    if let window = SleepWindowStore.shared.lastNight {
+      return (Int((window.performance * 100).rounded()), .local)
+    }
+    return (nil, .none)
+  }
+
+  private func sleepRingHero(value: Int?, source: String?) -> some View {
+    let color = Color(red: 0.55, green: 0.85, blue: 1.0)
+    return ZStack {
+      Circle()
+        .stroke(Color.white.opacity(0.06), lineWidth: 8)
+      Circle()
+        .trim(from: 0, to: value.map { min(Double($0) / 100.0, 1) } ?? 0)
+        .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+        .shadow(color: color.opacity(0.55), radius: 5)
+      VStack(spacing: 2) {
+        Text(value.map { "\($0)" } ?? "--")
+          .font(.system(size: 26, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+        Text("SLEEP")
+          .font(.system(size: 8, weight: .heavy, design: .rounded))
+          .tracking(1.8)
+          .foregroundStyle(color)
+        if let source {
+          Text(source)
+            .font(.system(size: 6, weight: .heavy, design: .rounded))
+            .tracking(1)
+            .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+        }
+      }
+    }
+    .frame(width: 104, height: 104)
+  }
+
+  private func recoveryRingHero(value: Int?, color: Color, source: String?) -> some View {
+    ZStack {
+      Circle()
+        .stroke(Color.white.opacity(0.06), lineWidth: 8)
+      Circle()
+        .trim(from: 0, to: value.map { Double($0) / 100.0 } ?? 0)
+        .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+        .shadow(color: color.opacity(0.55), radius: 5)
+      VStack(spacing: 2) {
+        Text(value.map { "\($0)" } ?? "--")
+          .font(.system(size: 26, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+        Text("RECOVERY")
+          .font(.system(size: 8, weight: .heavy, design: .rounded))
+          .tracking(1.8)
+          .foregroundStyle(color)
+        if let source {
+          Text(source)
+            .font(.system(size: 6, weight: .heavy, design: .rounded))
+            .tracking(1)
+            .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+        }
+      }
+    }
+    .frame(width: 104, height: 104)
+  }
+
+  private func strainRingHero(
+    value: Double, color: Color, source: String?,
+    targetMin: Double, targetMax: Double, targetLabel: String
+  ) -> some View {
+    let frac = min(value / 21.0, 1)
+    let target = (targetMin + targetMax) / 2
+    let targetFrac = target / 21.0
+    let bandStart = targetMin / 21.0
+    let bandEnd = targetMax / 21.0
+    let tickEpsilon = 0.002
+    return ZStack {
+      Circle()
+        .stroke(Color.white.opacity(0.06), lineWidth: 8)
+      // Gray-filled range arc spanning the target band.
+      Circle()
+        .trim(from: bandStart, to: bandEnd)
+        .stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+      // Thin white center line at the midpoint of the band — the target.
+      Circle()
+        .trim(from: targetFrac - tickEpsilon, to: targetFrac + tickEpsilon)
+        .stroke(Color.white, style: StrokeStyle(lineWidth: 8, lineCap: .butt))
+        .rotationEffect(.degrees(-90))
+      Circle()
+        .trim(from: 0, to: frac)
+        .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+        .shadow(color: color.opacity(0.55), radius: 5)
+      VStack(spacing: 2) {
+        Text(String(format: "%.1f", value))
+          .font(.system(size: 22, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+        Text("STRAIN")
+          .font(.system(size: 8, weight: .heavy, design: .rounded))
+          .tracking(1.8)
+          .foregroundStyle(color)
+        Text("target \(Int(target))")
+          .font(.system(size: 6, weight: .heavy, design: .rounded))
+          .tracking(1)
+          .foregroundStyle(.white.opacity(0.55))
+        if let source {
+          Text(source)
+            .font(.system(size: 6, weight: .heavy, design: .rounded))
+            .tracking(1)
+            .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+        }
+      }
+      .padding(.horizontal, 8)
+    }
+    .frame(width: 104, height: 104)
+  }
+
+  private struct HeroStrainTarget {
+    let label: String
+    let minimum: Double
+    let maximum: Double
+  }
+
+  /// Same band tiers used by `WhoopStrainTargetCard`, kept in sync.
+  private func strainTarget(forRecovery recovery: Int, isUnknown: Bool) -> HeroStrainTarget {
+    if isUnknown { return HeroStrainTarget(label: "BASELINE", minimum: 10, maximum: 14) }
+    if recovery >= 67 { return HeroStrainTarget(label: "PUSH", minimum: 14, maximum: 18) }
+    if recovery >= 34 { return HeroStrainTarget(label: "MODERATE", minimum: 10, maximum: 14) }
+    return HeroStrainTarget(label: "RECOVERY", minimum: 6, maximum: 10)
   }
 
   private var recoveryRing: some View {

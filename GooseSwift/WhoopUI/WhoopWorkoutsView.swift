@@ -59,58 +59,59 @@ struct WhoopWorkoutsView: View {
   }
 
   private func localWorkoutRow(_ workout: CompletedWorkout) -> some View {
-    HStack(alignment: .center, spacing: 14) {
-      Image(systemName: Self.icon(for: workout.activityRaw))
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundStyle(.white)
-        .frame(width: 44, height: 44)
-        .background(
-          Circle().fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.22))
-        )
+    VStack(spacing: 12) {
+      HStack(alignment: .center, spacing: 14) {
+        Image(systemName: Self.icon(for: workout.activityRaw))
+          .font(.system(size: 20, weight: .semibold))
+          .foregroundStyle(.white)
+          .frame(width: 44, height: 44)
+          .background(
+            Circle().fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.22))
+          )
 
-      VStack(alignment: .leading, spacing: 3) {
-        HStack(spacing: 6) {
-          Text(workout.activityTitle)
-            .font(.system(size: 15, weight: .bold, design: .rounded))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-          Text("LOCAL")
-            .font(.system(size: 8, weight: .heavy, design: .rounded))
-            .tracking(1)
-            .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(
-              RoundedRectangle(cornerRadius: 3, style: .continuous)
-                .fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.18))
-            )
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 6) {
+            Text(workout.activityTitle)
+              .font(.system(size: 15, weight: .bold, design: .rounded))
+              .foregroundStyle(.white)
+              .lineLimit(1)
+            Text("LOCAL")
+              .font(.system(size: 8, weight: .heavy, design: .rounded))
+              .tracking(1)
+              .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+              .padding(.horizontal, 4)
+              .padding(.vertical, 2)
+              .background(
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                  .fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.18))
+              )
+          }
+          Text(Self.shortDateLabel(workout.startedAt))
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.55))
         }
-        Text(Self.shortDateLabel(workout.startedAt))
-          .font(.system(size: 11, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white.opacity(0.55))
+
+        Spacer(minLength: 8)
+
+        VStack(alignment: .trailing, spacing: 3) {
+          Text(workout.maxHeartRate.map { "\($0)" } ?? "--")
+            .font(.system(size: 17, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(Color(red: 1.0, green: 0.37, blue: 0.42))
+          Text("MAX HR")
+            .font(.system(size: 9, weight: .heavy, design: .rounded))
+            .tracking(1.5)
+            .foregroundStyle(.white.opacity(0.45))
+        }
       }
 
-      Spacer(minLength: 8)
-
-      VStack(alignment: .trailing, spacing: 3) {
-        Text(workout.maxHeartRate.map { "\($0)" } ?? "--")
-          .font(.system(size: 17, weight: .heavy, design: .rounded))
-          .monospacedDigit()
-          .foregroundStyle(Color(red: 1.0, green: 0.37, blue: 0.42))
-        Text("MAX HR")
-          .font(.system(size: 9, weight: .heavy, design: .rounded))
-          .tracking(1.5)
-          .foregroundStyle(.white.opacity(0.45))
-      }
+      localDetailStrip(workout)
     }
     .padding(14)
     .background(
       RoundedRectangle(cornerRadius: 16, style: .continuous)
         .fill(Color.white.opacity(0.04))
     )
-    .overlay(alignment: .bottom) {
-      localDetailStrip(workout)
-    }
   }
 
   private func localDetailStrip(_ workout: CompletedWorkout) -> some View {
@@ -125,9 +126,6 @@ struct WhoopWorkoutsView: View {
       ))
       Spacer(minLength: 0)
     }
-    .padding(.horizontal, 14)
-    .padding(.bottom, 10)
-    .offset(y: 22)
   }
 
   private static func shortDateLabel(_ date: Date) -> String {
@@ -169,46 +167,47 @@ struct WhoopWorkoutsView: View {
   }
 
   private func activityRow(_ activity: WhoopActivity) -> some View {
-    HStack(alignment: .center, spacing: 14) {
-      Image(systemName: Self.icon(for: activity.type ?? activity.name ?? ""))
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundStyle(.white)
-        .frame(width: 44, height: 44)
-        .background(
-          Circle().fill(Color.white.opacity(0.06))
-        )
-
-      VStack(alignment: .leading, spacing: 3) {
-        Text((activity.name ?? "Activity").capitalized)
-          .font(.system(size: 15, weight: .bold, design: .rounded))
+    VStack(spacing: 12) {
+      HStack(alignment: .center, spacing: 14) {
+        Image(systemName: Self.icon(for: activity.type ?? activity.name ?? ""))
+          .font(.system(size: 20, weight: .semibold))
           .foregroundStyle(.white)
-          .lineLimit(1)
-        Text(Self.dateLabel(activity.date))
-          .font(.system(size: 11, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white.opacity(0.55))
+          .frame(width: 44, height: 44)
+          .background(
+            Circle().fill(Color.white.opacity(0.06))
+          )
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text((activity.name ?? "Activity").capitalized)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+          Text(Self.dateLabel(activity.date))
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.55))
+        }
+
+        Spacer(minLength: 8)
+
+        VStack(alignment: .trailing, spacing: 3) {
+          Text(activity.strain.map { String(format: "%.1f", $0) } ?? "--")
+            .font(.system(size: 17, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(Self.strainColor(activity.strain ?? 0))
+          Text("STRAIN")
+            .font(.system(size: 9, weight: .heavy, design: .rounded))
+            .tracking(1.5)
+            .foregroundStyle(.white.opacity(0.45))
+        }
       }
 
-      Spacer(minLength: 8)
-
-      VStack(alignment: .trailing, spacing: 3) {
-        Text(activity.strain.map { String(format: "%.1f", $0) } ?? "--")
-          .font(.system(size: 17, weight: .heavy, design: .rounded))
-          .monospacedDigit()
-          .foregroundStyle(Self.strainColor(activity.strain ?? 0))
-        Text("STRAIN")
-          .font(.system(size: 9, weight: .heavy, design: .rounded))
-          .tracking(1.5)
-          .foregroundStyle(.white.opacity(0.45))
-      }
+      detailStrip(activity)
     }
     .padding(14)
     .background(
       RoundedRectangle(cornerRadius: 16, style: .continuous)
         .fill(Color.white.opacity(0.04))
     )
-    .overlay(alignment: .bottom) {
-      detailStrip(activity)
-    }
   }
 
   private func detailStrip(_ activity: WhoopActivity) -> some View {
@@ -221,9 +220,6 @@ struct WhoopWorkoutsView: View {
       stat(label: "KJ", value: activity.kilojoule.map { String(format: "%.0f", $0) } ?? "--")
       Spacer(minLength: 0)
     }
-    .padding(.horizontal, 14)
-    .padding(.bottom, 10)
-    .offset(y: 22)
   }
 
   private func stat(label: String, value: String) -> some View {

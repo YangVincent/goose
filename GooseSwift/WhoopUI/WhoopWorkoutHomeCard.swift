@@ -4,16 +4,15 @@ import SwiftUI
 /// currently-selected day. Tappable rows route into the existing Workouts tab
 /// path via `WhoopMetric.strain` (the closest existing metric detail).
 struct WhoopWorkoutHomeCard: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
   @ObservedObject var localWorkouts: CompletedWorkoutStore = .shared
 
   var body: some View {
-    let activities = todaysActivities
     let locals = todaysLocalWorkouts
     return VStack(alignment: .leading, spacing: 14) {
-      header(count: activities.count + locals.count)
+      header(count: locals.count)
 
-      if activities.isEmpty && locals.isEmpty {
+      if locals.isEmpty {
         emptyState
       } else {
         VStack(spacing: 10) {
@@ -24,9 +23,6 @@ struct WhoopWorkoutHomeCard: View {
               localWorkoutRow(workout)
             }
             .buttonStyle(.plain)
-          }
-          ForEach(activities) { activity in
-            activityRow(activity)
           }
         }
       }
@@ -58,15 +54,11 @@ struct WhoopWorkoutHomeCard: View {
     )
   }
 
-  private var todaysActivities: [WhoopActivity] {
-    let iso = client.isoDate(client.currentDate)
-    return client.activities.filter { activity in
-      String(activity.date.prefix(10)) == iso
-    }
-  }
+  // Removed: cloud activities. todaysLocalWorkouts (SQLite-backed) is the
+  // sole source for this card going forward.
 
   private var todaysLocalWorkouts: [CompletedWorkout] {
-    let iso = client.isoDate(client.currentDate)
+    let iso = selectedDay.isoDate(selectedDay.currentDate)
     return localWorkouts.workouts(onISODate: iso)
   }
 

@@ -26,10 +26,20 @@ enum WhoopMetric: Hashable, Identifiable {
 }
 
 struct WhoopMetricDetailView: View {
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
   let metric: WhoopMetric
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
 
   var body: some View {
+    // Sleep has its own richer detail view.
+    if metric == .sleep {
+      SleepDetailView()
+    } else {
+      legacyDetail
+    }
+  }
+
+  private var legacyDetail: some View {
     ZStack {
       WhoopHomeView.detailBackground.ignoresSafeArea()
 
@@ -47,9 +57,8 @@ struct WhoopMetricDetailView: View {
     .navigationBarTitleDisplayMode(.large)
     .toolbarColorScheme(.dark, for: .navigationBar)
     .task {
-      if client.recoveryHistory.isEmpty {
-        await client.loadRecoveryHistory()
-      }
+      // SQLite-only.
+      await dailyStore.refreshFromLocal(databasePath: HealthDataStore.defaultDatabasePath())
     }
   }
 
@@ -152,16 +161,14 @@ struct WhoopMetricDetailView: View {
   }
 
   private var primaryValueText: String {
+    let summary = dailyStore.summary(for: selectedDay.currentDate)
     switch metric {
     case .recovery:
-      let v = client.currentDay?.recovery?.recovery_score
-      return v.map { "\(Int($0.rounded()))" } ?? "--"
+      return summary?.recoveryScore.map { "\(Int($0.rounded()))" } ?? "--"
     case .sleep:
-      let v = client.currentDay?.sleep?.performance
-      return v.map { "\(Int($0.rounded()))" } ?? "--"
+      return summary?.sleepPerformancePct.map { "\(Int($0.rounded()))" } ?? "--"
     case .strain:
-      let v = client.currentDay?.strain?.strain
-      return v.map { String(format: "%.1f", $0) } ?? "--"
+      return summary?.strainScore.map { String(format: "%.1f", $0) } ?? "--"
     }
   }
 
@@ -174,54 +181,52 @@ struct WhoopMetricDetailView: View {
   }
 
   private var breakdownItems: [(String, String)] {
+    let summary = dailyStore.summary(for: selectedDay.currentDate)
     switch metric {
     case .recovery:
-      let r = client.currentDay?.recovery
       return [
-        ("HRV",        format(r?.hrv_rmssd_milli, unit: "ms", digits: 1)),
-        ("RHR",        format(r?.resting_heart_rate, unit: "bpm", digits: 0)),
-        ("SPO₂",       format(r?.spo2_percentage, unit: "%", digits: 1)),
-        ("SKIN TEMP",  format(r?.skin_temp_celsius, unit: "°C", digits: 1))
+        ("HRV",        format(summary?.hrvRmssdMs, unit: "ms", digits: 1)),
+        ("RHR",        format(summary?.restingHrBpm, unit: "bpm", digits: 0)),
+        ("SPO₂",       format(summary?.spo2Pct, unit: "%", digits: 1)),
+        ("SKIN TEMP",  format(summary?.skinTempC, unit: "°C", digits: 1))
       ]
     case .sleep:
-      let s = client.currentDay?.sleep
-      let stages = s?.stage_summary
       return [
-        ("EFFICIENCY",   format(s?.efficiency, unit: "%", digits: 1)),
-        ("IN BED",       Self.formatMillis(stages?.total_in_bed_time_milli)),
-        ("DEEP",         Self.formatMillis(stages?.total_slow_wave_sleep_time_milli)),
-        ("REM",          Self.formatMillis(stages?.total_rem_sleep_time_milli)),
-        ("LIGHT",        Self.formatMillis(stages?.total_light_sleep_time_milli)),
-        ("CYCLES",       (stages?.sleep_cycle_count).map { "\($0)" } ?? "--")
+        ("EFFICIENCY",   format(summary?.sleepEfficiencyPct, unit: "%", digits: 1)),
+        ("IN BED",       Self.formatMillis(summary?.sleepInBedMs)),
+        ("DEEP",         Self.formatMillis(summary?.sleepDeepMs)),
+        ("REM",          Self.formatMillis(summary?.sleepRemMs)),
+        ("LIGHT",        Self.formatMillis(summary?.sleepLightMs)),
+        ("CYCLES",       summary?.sleepCycleCount.map { "\($0)" } ?? "--")
       ]
     case .strain:
-      let strain = client.currentDay?.strain
       return [
-        ("KILOJOULES", format(strain?.kilojoule, unit: "kJ", digits: 0))
+        ("KILOJOULES", format(summary?.strainKilojoules, unit: "kJ", digits: 0))
       ]
     }
   }
 
   private var chartData: [ChartPoint] {
-    let history = client.recoveryHistory.prefix(14).reversed()
-    let isoFormatter = ISO8601DateFormatter()
-    isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let labelFormatter = DateFormatter()
     labelFormatter.dateFormat = "d"
-    return history.compactMap { entry in
-      guard let startStr = entry.start,
-            let date = isoFormatter.date(from: startStr) ?? ISO8601DateFormatter().date(from: startStr) else {
-        return nil
+    let parser = DateFormatter()
+    parser.dateFormat = "yyyy-MM-dd"
+    parser.timeZone = TimeZone.current
+    let entries = dailyStore.byDate.values
+      .compactMap { day -> (Date, Double)? in
+        guard let date = parser.date(from: day.dateKey) else { return nil }
+        let v: Double?
+        switch metric {
+        case .recovery: v = day.recoveryScore
+        case .sleep:    v = day.hrvRmssdMs
+        case .strain:   v = day.restingHrBpm
+        }
+        guard let value = v else { return nil }
+        return (date, value)
       }
-      let value: Double?
-      switch metric {
-      case .recovery: value = entry.recovery_score
-      case .sleep:    value = entry.hrv_rmssd_milli
-      case .strain:   value = entry.resting_heart_rate
-      }
-      guard let v = value else { return nil }
-      return ChartPoint(label: labelFormatter.string(from: date), value: v)
-    }
+      .sorted { $0.0 < $1.0 }
+      .suffix(14)
+    return entries.map { ChartPoint(label: labelFormatter.string(from: $0.0), value: $0.1) }
   }
 
   private var chartYDomain: ClosedRange<Double> {

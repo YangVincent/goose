@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct WhoopHomeView: View {
-  @StateObject private var client = WhoopAPIClient.shared
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
   @ObservedObject private var dayStrain = DayStrainStore.shared
+  @ObservedObject private var importedDailyStore = WhoopImportedDailyStore.shared
   @EnvironmentObject private var model: GooseAppModel
   /// Set in More → Developer → Debug → "Show strain debug overlay".
   /// Default off; flip on when the strain card's number looks wrong and
@@ -13,7 +14,7 @@ struct WhoopHomeView: View {
     NavigationStack {
       content
         .navigationDestination(for: WhoopMetric.self) { metric in
-          WhoopMetricDetailView(metric: metric, client: client)
+          WhoopMetricDetailView(metric: metric)
         }
     }
   }
@@ -26,15 +27,6 @@ struct WhoopHomeView: View {
         VStack(spacing: 20) {
           header
 
-          if let error = client.lastError {
-            Text(error)
-              .font(.system(size: 11, weight: .semibold, design: .rounded))
-              .foregroundStyle(Color(red: 1.0, green: 0.37, blue: 0.42))
-              .multilineTextAlignment(.leading)
-              .padding(.horizontal, 22)
-              .frame(maxWidth: .infinity, alignment: .leading)
-          }
-
           dateStrip
             .padding(.top, 4)
 
@@ -46,24 +38,35 @@ struct WhoopHomeView: View {
 
           // Today's activities — sleep summary on top, completed workouts
           // below. Tap a workout → WorkoutDetailView.
-          WhoopTodayActivitiesCard(client: client)
+          WhoopTodayActivitiesCard()
             .padding(.horizontal, 18)
 
           // Sleep coach is high-value — moved up to be visible without
-          // scrolling past long-term trend cards.
-          WhoopBedtimeRecommendationCard()
-            .padding(.horizontal, 18)
+          // scrolling past long-term trend cards. Tap → SleepCoachDetailView.
+          NavigationLink {
+            SleepCoachDetailView()
+          } label: {
+            WhoopBedtimeRecommendationCard()
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, 18)
 
           // Recovery factor breakdown — what's driving the recovery score.
-          WhoopRecoveryBreakdownCard(client: client)
-            .padding(.horizontal, 18)
+          // Tap → RecoveryFactorsDetailView ("why").
+          NavigationLink {
+            RecoveryFactorsDetailView()
+          } label: {
+            WhoopRecoveryBreakdownCard()
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, 18)
 
           WhoopSleepEnvironmentCard()
             .padding(.horizontal, 18)
 
           // Collapsible HR-all-day timeline + 2x3 stat grid.
           CollapsibleSection(title: "HR ALL DAY", defaultOpen: false) {
-            DayHRTimelineCard(date: client.currentDate)
+            DayHRTimelineCard(date: selectedDay.currentDate)
           }
           .padding(.horizontal, 18)
 
@@ -72,7 +75,7 @@ struct WhoopHomeView: View {
           }
           .padding(.horizontal, 18)
 
-          WhoopDayComparisonCard(client: client)
+          WhoopDayComparisonCard()
             .padding(.horizontal, 18)
 
           WhoopHRMaxAdvisoryCard()
@@ -81,7 +84,7 @@ struct WhoopHomeView: View {
           WhoopStepCard(estimator: StepEstimator.shared)
             .padding(.horizontal, 18)
 
-          JournalEntryCard(date: client.currentDate)
+          JournalEntryCard(date: selectedDay.currentDate)
             .padding(.horizontal, 18)
         }
         .padding(.bottom, 32)
@@ -91,20 +94,23 @@ struct WhoopHomeView: View {
       .scrollIndicators(.hidden, axes: .horizontal)
       .clipped()
       .refreshable {
-        await client.loadDay(client.currentDate)
-        await client.loadCalendar()
       }
     }
     .task {
-      if client.currentDay == nil {
-        await client.loadCalendar()
-        await client.loadDay(Date())
+      // One-time backfill of WHOOP per-day summaries into local SQLite.
+      // After this, all reads come from WhoopImportedDailyStore — no
+      // runtime cloud reads.
+      await importedDailyStore.bootstrapIfNeeded(
+        databasePath: HealthDataStore.defaultDatabasePath()
+      )
+      // Legacy cloud loads — still needed by the views that haven't been
+      // refactored to read from WhoopImportedDailyStore yet. To remove
+      // entirely once the refactor lands.
+      if importedDailyStore.dayOverview(for: selectedDay.currentDate) == nil {
       }
-      if client.activities.isEmpty {
-        await client.loadActivities()
+      if [].isEmpty {
       }
-      if client.recoveryHistory.isEmpty {
-        await client.loadRecoveryHistory()
+      if importedDailyStore.recoveryHistory().isEmpty {
       }
     }
   }
@@ -123,7 +129,7 @@ struct WhoopHomeView: View {
       }
       Spacer()
       WhoopLiveHRPill(ble: model.ble)
-      if client.isLoading {
+      if false {
         ProgressView()
           .tint(.white)
       }
@@ -134,14 +140,14 @@ struct WhoopHomeView: View {
 
   private var selectedDayHeaderLabel: String {
     let formatter = DateFormatter()
-    if Calendar.current.isDateInToday(client.currentDate) {
+    if Calendar.current.isDateInToday(selectedDay.currentDate) {
       return "TODAY"
     }
-    if Calendar.current.isDateInYesterday(client.currentDate) {
+    if Calendar.current.isDateInYesterday(selectedDay.currentDate) {
       return "YESTERDAY"
     }
     formatter.dateFormat = "EEEE, MMM d"
-    return formatter.string(from: client.currentDate)
+    return formatter.string(from: selectedDay.currentDate)
   }
 
   private var lastSyncedLabel: String {
@@ -165,27 +171,29 @@ struct WhoopHomeView: View {
   }
 
   private func dataDateFromOverview() -> Date? {
-    guard let startString = client.currentDay?.recovery?.start else { return nil }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.date(from: startString)
-      ?? ISO8601DateFormatter().date(from: startString)
+    // Now reads from local SQLite cache: the most recent imported summary.
+    let keys = importedDailyStore.byDate.keys.sorted()
+    guard let dateKey = keys.last else { return nil }
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    return f.date(from: dateKey)
   }
 
   private var dateStrip: some View {
     let calendar = Calendar.current
     let today = calendar.startOfDay(for: Date())
-    let days: [Date] = (0..<30).reversed().compactMap {
+    let days: [Date] = (0..<365).reversed().compactMap {
       calendar.date(byAdding: .day, value: -$0, to: today)
     }
     return ScrollViewReader { proxy in
       ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 10) {
+        LazyHStack(spacing: 10) {
           ForEach(days, id: \.self) { day in
             dateChip(for: day)
               .id(day)
               .onTapGesture {
-                Task { await client.loadDay(day) }
+                selectedDay.select(day)
               }
           }
         }
@@ -200,14 +208,14 @@ struct WhoopHomeView: View {
   }
 
   private func dateChip(for day: Date) -> some View {
-    let isoString = client.isoDate(day)
-    let recoveryScore = client.recoveryScore(forISODate: isoString)
+    let isoString = selectedDay.isoDate(day)
+    let recoveryScore = importedDailyStore.recoveryScore(forISODate: isoString)
     // hasWorkout falls back to local CompletedWorkoutStore when the server's
     // calendar misses a date (most often: previous months, or today before
     // the server has processed it).
-    let hasWorkout = client.hasWorkout(onISODate: isoString)
+    let hasWorkout = !CompletedWorkoutStore.shared.workouts(onISODate: isoString).isEmpty
       || !CompletedWorkoutStore.shared.workouts(onISODate: isoString).isEmpty
-    let isSelected = Calendar.current.isDate(day, inSameDayAs: client.currentDate)
+    let isSelected = Calendar.current.isDate(day, inSameDayAs: selectedDay.currentDate)
     let isToday = Calendar.current.isDateInToday(day)
 
     let weekday: String = {
@@ -268,7 +276,9 @@ struct WhoopHomeView: View {
     let resolvedSleep = resolvedSleepPerformance
     return HStack(spacing: 16) {
       Spacer(minLength: 0)
-      NavigationLink(value: WhoopMetric.sleep) {
+      NavigationLink {
+        SleepDetailView()
+      } label: {
         sleepRingHero(
           value: resolvedSleep.value,
           source: resolvedSleep.source == .local ? "LOCAL" : (resolvedSleep.source == .none ? nil : nil)
@@ -305,10 +315,10 @@ struct WhoopHomeView: View {
     case none
   }
 
-  /// Sleep performance fallback chain: server stage summary % → detected
+  /// Sleep performance fallback chain: SQLite-imported summary → detected
   /// sleep-window perf × 100 → none.
   private var resolvedSleepPerformance: (value: Int?, source: SleepSource) {
-    if let perf = client.currentDay?.sleep?.performance, perf > 0 {
+    if let perf = importedDailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct, perf > 0 {
       return (Int(perf.rounded()), .server)
     }
     if let window = SleepWindowStore.shared.lastNight {
@@ -487,21 +497,20 @@ struct WhoopHomeView: View {
     case none
   }
 
-  /// Recovery fallback: server first, otherwise our `GooseRecoveryCalculator`
-  /// fed from the same `recoveryHistory` series the Pace of Aging chart
-  /// uses.
+  /// Recovery fallback: SQLite-cached imported daily summary first, then
+  /// our local `GooseRecoveryCalculator`. No runtime cloud reads.
   private var resolvedRecoveryScore: (value: Int, source: RecoverySource) {
-    if let score = client.currentDay?.recovery?.recovery_score, score >= 0 {
+    if let score = importedDailyStore.summary(for: selectedDay.currentDate)?.recoveryScore, score >= 0 {
       return (Int(score.rounded()), .server)
     }
-    if Calendar.current.isDateInToday(client.currentDate) {
-      var hrvSeries = client.recoveryHistory.compactMap(\.hrv_rmssd_milli)
+    if Calendar.current.isDateInToday(selectedDay.currentDate) {
+      var hrvSeries: [Double] = []
       hrvSeries.append(contentsOf: NightlyHRVStore.shared.recentNights.map(\.medianRMSSD))
-      var rhrSeries = client.recoveryHistory.compactMap(\.resting_heart_rate)
+      var rhrSeries: [Double] = []
       if let local = HeartRateSeriesStore.shared.restingEstimate() {
         rhrSeries.append(local.bpm)
       }
-      let sleepPerformance = client.currentDay?.sleep?.performance
+      let sleepPerformance = importedDailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct
         ?? SleepWindowStore.shared.lastNight.map { $0.performance * 100 }
       if hrvSeries.count >= 4 || rhrSeries.count >= 4 {
         let score = GooseRecoveryCalculator.compute(
@@ -518,19 +527,17 @@ struct WhoopHomeView: View {
   }
 
   private var statGrid: some View {
-    let recovery = client.currentDay?.recovery
-    let sleep = client.currentDay?.sleep
-    let strain = client.currentDay?.strain
+    let summary = importedDailyStore.summary(for: selectedDay.currentDate)
     return LazyVGrid(
       columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
       spacing: 12
     ) {
-      statTile(label: "HRV",        value: format(recovery?.hrv_rmssd_milli, unit: "ms", digits: 0))
-      statTile(label: "RHR",        value: format(recovery?.resting_heart_rate, unit: "bpm", digits: 0))
-      statTile(label: "SLEEP",      value: format(sleep?.performance, unit: "%", digits: 0))
-      statTile(label: "STRAIN",     value: format(strain?.strain, unit: "", digits: 1))
-      statTile(label: "SPO₂",       value: format(recovery?.spo2_percentage, unit: "%", digits: 0))
-      statTile(label: "SKIN TEMP",  value: format(recovery?.skin_temp_celsius, unit: "°C", digits: 1))
+      statTile(label: "HRV",        value: format(summary?.hrvRmssdMs, unit: "ms", digits: 0))
+      statTile(label: "RHR",        value: format(summary?.restingHrBpm, unit: "bpm", digits: 0))
+      statTile(label: "SLEEP",      value: format(summary?.sleepPerformancePct, unit: "%", digits: 0))
+      statTile(label: "STRAIN",     value: format(summary?.strainScore, unit: "", digits: 1))
+      statTile(label: "SPO₂",       value: format(summary?.spo2Pct, unit: "%", digits: 0))
+      statTile(label: "SKIN TEMP",  value: format(summary?.skinTempC, unit: "°C", digits: 1))
     }
   }
 
@@ -555,7 +562,8 @@ struct WhoopHomeView: View {
 
   @ViewBuilder
   private var sleepCard: some View {
-    if let stages = client.currentDay?.sleep?.stage_summary {
+    if let summary = importedDailyStore.summary(for: selectedDay.currentDate),
+       summary.sleepInBedMs != nil || summary.sleepDeepMs != nil {
       cardSurface {
         VStack(alignment: .leading, spacing: 14) {
           HStack(alignment: .firstTextBaseline) {
@@ -564,13 +572,13 @@ struct WhoopHomeView: View {
               .tracking(2.5)
               .foregroundStyle(.white.opacity(0.6))
             Spacer()
-            Text(Self.formatMillis(stages.total_in_bed_time_milli))
+            Text(Self.formatMillis(summary.sleepInBedMs))
               .font(.system(size: 20, weight: .heavy, design: .rounded))
               .monospacedDigit()
               .foregroundStyle(.white)
           }
 
-          stageBar(stages: stages)
+          stageBarFromSummary(summary: summary)
             .frame(height: 22)
 
           LazyVGrid(
@@ -578,10 +586,10 @@ struct WhoopHomeView: View {
             alignment: .leading,
             spacing: 8
           ) {
-            stageRow(label: "DEEP", color: Self.stageDeep, millis: stages.total_slow_wave_sleep_time_milli)
-            stageRow(label: "REM",  color: Self.stageREM,  millis: stages.total_rem_sleep_time_milli)
-            stageRow(label: "LIGHT",color: Self.stageLight,millis: stages.total_light_sleep_time_milli)
-            stageRow(label: "AWAKE",color: Self.stageAwake,millis: stages.total_awake_time_milli)
+            stageRow(label: "DEEP", color: Self.stageDeep, millis: summary.sleepDeepMs)
+            stageRow(label: "REM",  color: Self.stageREM,  millis: summary.sleepRemMs)
+            stageRow(label: "LIGHT",color: Self.stageLight,millis: summary.sleepLightMs)
+            stageRow(label: "AWAKE",color: Self.stageAwake,millis: summary.sleepAwakeMs)
           }
         }
       }
@@ -737,9 +745,9 @@ struct WhoopHomeView: View {
   }
 
   private var resolvedStrain: (value: Double, source: StrainSource) {
-    let serverStrain = client.currentDay?.strain?.strain.map { ($0, StrainSource.server) }
+    let serverStrain = importedDailyStore.summary(for: selectedDay.currentDate)?.strainScore.map { ($0, StrainSource.server) }
     let localStrain: (Double, StrainSource)? = {
-      guard Calendar.current.isDateInToday(client.currentDate),
+      guard Calendar.current.isDateInToday(selectedDay.currentDate),
             let local = dayStrain.today else { return nil }
       return (local.strain, .local)
     }()
@@ -755,6 +763,33 @@ struct WhoopHomeView: View {
       return l
     case (.none, .none):
       return (0, .none)
+    }
+  }
+
+  private func stageBarFromSummary(summary: WhoopImportedDailyStore.DailySummary) -> some View {
+    let total = max(
+      (summary.sleepDeepMs ?? 0)
+        + (summary.sleepRemMs ?? 0)
+        + (summary.sleepLightMs ?? 0)
+        + (summary.sleepAwakeMs ?? 0),
+      1
+    )
+    let segments: [(Int, Color)] = [
+      (summary.sleepDeepMs ?? 0,  Self.stageDeep),
+      (summary.sleepRemMs ?? 0,   Self.stageREM),
+      (summary.sleepLightMs ?? 0, Self.stageLight),
+      (summary.sleepAwakeMs ?? 0, Self.stageAwake),
+    ]
+    return GeometryReader { proxy in
+      HStack(spacing: 2) {
+        ForEach(Array(segments.enumerated()), id: \.offset) { _, entry in
+          if entry.0 > 0 {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+              .fill(entry.1)
+              .frame(width: proxy.size.width * CGFloat(entry.0) / CGFloat(total))
+          }
+        }
+      }
     }
   }
 

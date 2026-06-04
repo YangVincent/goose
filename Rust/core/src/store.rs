@@ -1476,6 +1476,47 @@ impl GooseStore {
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );
 
+            CREATE TABLE IF NOT EXISTS imported_daily_summary (
+                date_key TEXT PRIMARY KEY,
+                recovery_score REAL,
+                hrv_rmssd_ms REAL,
+                resting_hr_bpm REAL,
+                spo2_pct REAL,
+                skin_temp_c REAL,
+                sleep_performance_pct REAL,
+                sleep_efficiency_pct REAL,
+                sleep_in_bed_ms INTEGER,
+                sleep_awake_ms INTEGER,
+                sleep_light_ms INTEGER,
+                sleep_deep_ms INTEGER,
+                sleep_rem_ms INTEGER,
+                sleep_cycle_count INTEGER,
+                sleep_disturbance_count INTEGER,
+                sleep_need_baseline_ms INTEGER,
+                sleep_need_from_debt_ms INTEGER,
+                sleep_need_from_strain_ms INTEGER,
+                sleep_need_from_nap_ms INTEGER,
+                strain_score REAL,
+                strain_kilojoules REAL,
+                source TEXT NOT NULL DEFAULT 'whoop_cloud_import',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_imported_daily_summary_date
+                ON imported_daily_summary(date_key);
+
+            CREATE TABLE IF NOT EXISTS sleep_audio_events (
+                event_id TEXT PRIMARY KEY,
+                started_at_ms INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                peak_db REAL NOT NULL,
+                kind TEXT NOT NULL,
+                file_path TEXT,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sleep_audio_events_started_at
+                ON sleep_audio_events(started_at_ms);
+
             CREATE TABLE IF NOT EXISTS raw_r17_packets (
                 packet_id TEXT PRIMARY KEY,
                 captured_at_ms INTEGER NOT NULL,

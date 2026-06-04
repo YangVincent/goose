@@ -5,7 +5,8 @@ import SwiftUI
 /// `GooseRecoveryCalculator` into three visible component rows (HRV, RHR,
 /// sleep) with directional indicators relative to baseline.
 struct WhoopRecoveryBreakdownCard: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
   @State private var score: GooseRecoveryCalculator.Score?
 
   var body: some View {
@@ -56,7 +57,7 @@ struct WhoopRecoveryBreakdownCard: View {
         .fill(Color.white.opacity(0.04))
     )
     .onAppear { refresh() }
-    .onChange(of: client.recoveryHistory.count) { _, _ in refresh() }
+    .onChange(of: dailyStore.byDate.count) { _, _ in refresh() }
   }
 
   private var header: some View {
@@ -189,20 +190,16 @@ struct WhoopRecoveryBreakdownCard: View {
   private func refresh() {
     NightlyHRVStore.shared.refresh()
 
-    var hrvSeries = client.recoveryHistory.compactMap(\.hrv_rmssd_milli)
-    // Fold locally-derived nightly HRV (from our own RR intervals) into the
-    // series — when server data is empty (post-OAuth-expiry), this is how
-    // the recovery calculator still gets an HRV signal.
-    let localHRV = NightlyHRVStore.shared.recentNights.map(\.medianRMSSD)
-    hrvSeries.append(contentsOf: localHRV)
-
-    var rhrSeries = client.recoveryHistory.compactMap(\.resting_heart_rate)
+    // SQLite-backed: pull series from imported daily summaries, fold in
+    // local nightly HRV + local resting-HR estimate.
+    var hrvSeries = dailyStore.byDate.values.compactMap { $0.hrvRmssdMs }
+    hrvSeries.append(contentsOf: NightlyHRVStore.shared.recentNights.map(\.medianRMSSD))
+    var rhrSeries = dailyStore.byDate.values.compactMap { $0.restingHrBpm }
     if let localRHR = HeartRateSeriesStore.shared.restingEstimate() {
       rhrSeries.append(localRHR.bpm)
     }
 
-    // Sleep performance: server first, then our local sleep window detector.
-    let sleep = client.currentDay?.sleep?.performance
+    let sleep = dailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct
       ?? SleepWindowStore.shared.lastNight.map { $0.performance * 100 }
 
     guard hrvSeries.count >= 4 || rhrSeries.count >= 4 else { return }

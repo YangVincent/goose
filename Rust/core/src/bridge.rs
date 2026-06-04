@@ -158,8 +158,9 @@ use crate::{
         packet_timeline_from_decoded_frames,
     },
     swift_caches::{
-        HrSampleInput, HrvSampleInput, RawImuAxisMeta, RawImuPacketInput,
-        RawR17PacketInput, SensorSampleInput, StepDayInput,
+        HrSampleInput, HrvSampleInput, ImportedDailySummaryInput, RawImuAxisMeta,
+        RawImuPacketInput, RawR17PacketInput, SensorSampleInput, SleepAudioEventInput,
+        StepDayInput,
     },
     ui_coverage::{UiCoverageAuditInput, run_ui_coverage_audit},
 };
@@ -1482,6 +1483,13 @@ struct ExternalSleepHistoryImportArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct ExternalSleepHistoryListArgs {
+    database_path: String,
+    start_time_unix_ms: i64,
+    end_time_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct ExternalSleepSessionBridgeInput {
     sleep_id: String,
     source: String,
@@ -2351,6 +2359,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(external_sleep_history_import_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "sleep.list_external_history" => request_args::<ExternalSleepHistoryListArgs>(&request)
+            .and_then(external_sleep_history_list_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.add_correction_label" => request_args::<SleepCorrectionLabelArgs>(&request)
             .and_then(sleep_correction_label_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2511,6 +2523,34 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
         }
         "swift_caches.list_sensor_samples" => request_args::<SwiftCacheRangeArgs>(&request)
             .and_then(swift_caches_list_sensor_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_unsynced_hr_samples" => request_args::<SwiftOffloadLimitArgs>(&request)
+            .and_then(swift_caches_list_unsynced_hr_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.mark_hr_samples_synced" => request_args::<SwiftOffloadMarkSyncedArgs>(&request)
+            .and_then(swift_caches_mark_hr_samples_synced_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_unsynced_daily_summaries" => request_args::<SwiftOffloadLimitArgs>(&request)
+            .and_then(swift_caches_list_unsynced_daily_summaries_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.upsert_daily_summary" => request_args::<SwiftDailySummaryUpsertArgs>(&request)
+            .and_then(swift_caches_upsert_daily_summary_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_daily_summaries" => request_args::<SwiftDailySummariesRangeArgs>(&request)
+            .and_then(swift_caches_list_daily_summaries_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.append_sleep_audio_event" => request_args::<SwiftSleepAudioEventAppendArgs>(&request)
+            .and_then(swift_caches_append_sleep_audio_event_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_sleep_audio_events" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_sleep_audio_events_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "swift_caches.upsert_step_day" => request_args::<SwiftStepDayUpsertArgs>(&request)
@@ -6072,6 +6112,51 @@ fn external_sleep_history_import_bridge(
     }))
 }
 
+fn external_sleep_history_list_bridge(
+    args: ExternalSleepHistoryListArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let sessions = store
+        .external_sleep_sessions_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    let mut session_json: Vec<serde_json::Value> = Vec::with_capacity(sessions.len());
+    let mut total_stage_count = 0usize;
+    for session in &sessions {
+        let stages = store.external_sleep_stages_for_session(&session.sleep_id)?;
+        total_stage_count += stages.len();
+        let stage_json: Vec<serde_json::Value> = stages
+            .into_iter()
+            .map(|s| json!({
+                "stage_id": s.stage_id,
+                "sleep_id": s.sleep_id,
+                "stage_kind": s.stage_kind,
+                "start_time_unix_ms": s.start_time_unix_ms,
+                "end_time_unix_ms": s.end_time_unix_ms,
+                "duration_ms": s.duration_ms,
+                "confidence": s.confidence,
+            }))
+            .collect();
+        session_json.push(json!({
+            "sleep_id": session.sleep_id,
+            "source": session.source,
+            "platform": session.platform,
+            "platform_record_id": session.platform_record_id,
+            "start_time_unix_ms": session.start_time_unix_ms,
+            "end_time_unix_ms": session.end_time_unix_ms,
+            "duration_ms": session.duration_ms,
+            "timezone": session.timezone,
+            "confidence": session.confidence,
+            "stages": stage_json,
+        }));
+    }
+    Ok(json!({
+        "schema": "goose.external-sleep-history-list.v1",
+        "generated_by": "goose-bridge",
+        "session_count": session_json.len(),
+        "stage_count": total_stage_count,
+        "sessions": session_json,
+    }))
+}
+
 fn sleep_correction_label_bridge(args: SleepCorrectionLabelArgs) -> GooseResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let value_json = json_object_string("value", &args.value)?;
@@ -7833,6 +7918,95 @@ struct SwiftCacheRangeArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct SwiftDailySummaryUpsertArgs {
+    database_path: String,
+    date_key: String,
+    #[serde(default)]
+    recovery_score: Option<f64>,
+    #[serde(default)]
+    hrv_rmssd_ms: Option<f64>,
+    #[serde(default)]
+    resting_hr_bpm: Option<f64>,
+    #[serde(default)]
+    spo2_pct: Option<f64>,
+    #[serde(default)]
+    skin_temp_c: Option<f64>,
+    #[serde(default)]
+    sleep_performance_pct: Option<f64>,
+    #[serde(default)]
+    sleep_efficiency_pct: Option<f64>,
+    #[serde(default)]
+    sleep_in_bed_ms: Option<i64>,
+    #[serde(default)]
+    sleep_awake_ms: Option<i64>,
+    #[serde(default)]
+    sleep_light_ms: Option<i64>,
+    #[serde(default)]
+    sleep_deep_ms: Option<i64>,
+    #[serde(default)]
+    sleep_rem_ms: Option<i64>,
+    #[serde(default)]
+    sleep_cycle_count: Option<i64>,
+    #[serde(default)]
+    sleep_disturbance_count: Option<i64>,
+    #[serde(default)]
+    sleep_need_baseline_ms: Option<i64>,
+    #[serde(default)]
+    sleep_need_from_debt_ms: Option<i64>,
+    #[serde(default)]
+    sleep_need_from_strain_ms: Option<i64>,
+    #[serde(default)]
+    sleep_need_from_nap_ms: Option<i64>,
+    #[serde(default)]
+    strain_score: Option<f64>,
+    #[serde(default)]
+    strain_kilojoules: Option<f64>,
+    #[serde(default = "default_daily_summary_source")]
+    source: String,
+}
+
+fn default_daily_summary_source() -> String {
+    "whoop_cloud_import".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftDailySummariesRangeArgs {
+    database_path: String,
+    start_date_key: String,
+    end_date_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftOffloadLimitArgs {
+    database_path: String,
+    #[serde(default = "default_offload_batch_limit")]
+    limit: i64,
+}
+
+fn default_offload_batch_limit() -> i64 {
+    500
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftOffloadMarkSyncedArgs {
+    database_path: String,
+    ids: Vec<String>,
+    now_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftSleepAudioEventAppendArgs {
+    database_path: String,
+    event_id: String,
+    started_at_ms: i64,
+    duration_ms: i64,
+    peak_db: f64,
+    kind: String,
+    #[serde(default)]
+    file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SwiftCacheRangeLimitArgs {
     database_path: String,
     start_time_unix_ms: i64,
@@ -8075,6 +8249,117 @@ fn swift_caches_list_sensor_samples_bridge(
         "schema": "goose.sensor-samples.v1",
         "sample_count": rows.len(),
         "samples": rows,
+    }))
+}
+
+fn swift_caches_list_unsynced_hr_samples_bridge(
+    args: SwiftOffloadLimitArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.list_unsynced_hr_samples(args.limit)?;
+    Ok(json!({
+        "schema": "goose.offload.hr-samples.v1",
+        "row_count": rows.len(),
+        "rows": rows,
+    }))
+}
+
+fn swift_caches_mark_hr_samples_synced_bridge(
+    args: SwiftOffloadMarkSyncedArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let updated = store.mark_hr_samples_synced(&args.ids, args.now_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.offload.mark-synced.v1",
+        "updated_count": updated,
+    }))
+}
+
+fn swift_caches_list_unsynced_daily_summaries_bridge(
+    args: SwiftOffloadLimitArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.list_unsynced_daily_summaries(args.limit)?;
+    Ok(json!({
+        "schema": "goose.offload.daily-summaries.v1",
+        "row_count": rows.len(),
+        "rows": rows,
+    }))
+}
+
+fn swift_caches_upsert_daily_summary_bridge(
+    args: SwiftDailySummaryUpsertArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    store.upsert_imported_daily_summary(ImportedDailySummaryInput {
+        date_key: &args.date_key,
+        recovery_score: args.recovery_score,
+        hrv_rmssd_ms: args.hrv_rmssd_ms,
+        resting_hr_bpm: args.resting_hr_bpm,
+        spo2_pct: args.spo2_pct,
+        skin_temp_c: args.skin_temp_c,
+        sleep_performance_pct: args.sleep_performance_pct,
+        sleep_efficiency_pct: args.sleep_efficiency_pct,
+        sleep_in_bed_ms: args.sleep_in_bed_ms,
+        sleep_awake_ms: args.sleep_awake_ms,
+        sleep_light_ms: args.sleep_light_ms,
+        sleep_deep_ms: args.sleep_deep_ms,
+        sleep_rem_ms: args.sleep_rem_ms,
+        sleep_cycle_count: args.sleep_cycle_count,
+        sleep_disturbance_count: args.sleep_disturbance_count,
+        sleep_need_baseline_ms: args.sleep_need_baseline_ms,
+        sleep_need_from_debt_ms: args.sleep_need_from_debt_ms,
+        sleep_need_from_strain_ms: args.sleep_need_from_strain_ms,
+        sleep_need_from_nap_ms: args.sleep_need_from_nap_ms,
+        strain_score: args.strain_score,
+        strain_kilojoules: args.strain_kilojoules,
+        source: &args.source,
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-upsert.v1",
+        "upserted": true,
+    }))
+}
+
+fn swift_caches_list_daily_summaries_bridge(
+    args: SwiftDailySummariesRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.imported_daily_summaries_between(&args.start_date_key, &args.end_date_key)?;
+    Ok(json!({
+        "schema": "goose.daily-summaries.v1",
+        "day_count": rows.len(),
+        "days": rows,
+    }))
+}
+
+fn swift_caches_append_sleep_audio_event_bridge(
+    args: SwiftSleepAudioEventAppendArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let inserted = store.insert_sleep_audio_event(SleepAudioEventInput {
+        event_id: &args.event_id,
+        started_at_ms: args.started_at_ms,
+        duration_ms: args.duration_ms,
+        peak_db: args.peak_db,
+        kind: &args.kind,
+        file_path: args.file_path.as_deref(),
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-append.v1",
+        "inserted": inserted,
+    }))
+}
+
+fn swift_caches_list_sleep_audio_events_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.sleep_audio_events_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.sleep-audio-events.v1",
+        "event_count": rows.len(),
+        "events": rows,
     }))
 }
 

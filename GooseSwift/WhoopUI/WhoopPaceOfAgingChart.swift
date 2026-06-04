@@ -14,7 +14,7 @@ import SwiftUI
 /// averages from `healthspan` — aren't included per-day because the server
 /// only returns them as 30-day rollups.
 struct WhoopPaceOfAgingChart: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
   let chronologicalAge: Int
 
   @State private var rows: [DayPoint] = []
@@ -51,7 +51,7 @@ struct WhoopPaceOfAgingChart: View {
         .fill(Color.white.opacity(0.04))
     )
     .onAppear { refresh() }
-    .onChange(of: client.recoveryHistory.count) { _, _ in refresh() }
+    .onChange(of: dailyStore.byDate.count) { _, _ in refresh() }
   }
 
   private var header: some View {
@@ -202,23 +202,20 @@ struct WhoopPaceOfAgingChart: View {
   // MARK: - Data assembly
 
   private func refresh() {
-    let history = client.recoveryHistory
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let plain = ISO8601DateFormatter()
-    rows = history
-      .compactMap { recovery -> DayPoint? in
-        guard let startISO = recovery.start,
-              let date = parser.date(from: startISO) ?? plain.date(from: startISO) else { return nil }
-        let bioAge = bioAgeFromHRVRHR(
-          hrv: recovery.hrv_rmssd_milli,
-          rhr: recovery.resting_heart_rate
-        )
+    // SQLite-backed: build pace-of-aging from imported daily summaries.
+    let dailyStore = dailyStore
+    let parser = DateFormatter()
+    parser.dateFormat = "yyyy-MM-dd"
+    parser.timeZone = TimeZone.current
+    rows = dailyStore.byDate.values
+      .compactMap { day -> DayPoint? in
+        guard let date = parser.date(from: day.dateKey) else { return nil }
+        let bioAge = bioAgeFromHRVRHR(hrv: day.hrvRmssdMs, rhr: day.restingHrBpm)
         return DayPoint(
           id: Self.isoDate(date),
           date: date,
-          hrv: recovery.hrv_rmssd_milli,
-          rhr: recovery.resting_heart_rate,
+          hrv: day.hrvRmssdMs,
+          rhr: day.restingHrBpm,
           bioAge: bioAge
         )
       }

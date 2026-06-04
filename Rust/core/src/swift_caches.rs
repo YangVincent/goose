@@ -242,6 +242,85 @@ pub struct StepDayRow {
     pub updated_at: String,
 }
 
+// MARK: - Imported daily summaries (recovery + sleep + strain per day)
+
+#[derive(Debug, Clone)]
+pub struct ImportedDailySummaryInput<'a> {
+    pub date_key: &'a str,
+    pub recovery_score: Option<f64>,
+    pub hrv_rmssd_ms: Option<f64>,
+    pub resting_hr_bpm: Option<f64>,
+    pub spo2_pct: Option<f64>,
+    pub skin_temp_c: Option<f64>,
+    pub sleep_performance_pct: Option<f64>,
+    pub sleep_efficiency_pct: Option<f64>,
+    pub sleep_in_bed_ms: Option<i64>,
+    pub sleep_awake_ms: Option<i64>,
+    pub sleep_light_ms: Option<i64>,
+    pub sleep_deep_ms: Option<i64>,
+    pub sleep_rem_ms: Option<i64>,
+    pub sleep_cycle_count: Option<i64>,
+    pub sleep_disturbance_count: Option<i64>,
+    pub sleep_need_baseline_ms: Option<i64>,
+    pub sleep_need_from_debt_ms: Option<i64>,
+    pub sleep_need_from_strain_ms: Option<i64>,
+    pub sleep_need_from_nap_ms: Option<i64>,
+    pub strain_score: Option<f64>,
+    pub strain_kilojoules: Option<f64>,
+    pub source: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportedDailySummaryRow {
+    pub date_key: String,
+    pub recovery_score: Option<f64>,
+    pub hrv_rmssd_ms: Option<f64>,
+    pub resting_hr_bpm: Option<f64>,
+    pub spo2_pct: Option<f64>,
+    pub skin_temp_c: Option<f64>,
+    pub sleep_performance_pct: Option<f64>,
+    pub sleep_efficiency_pct: Option<f64>,
+    pub sleep_in_bed_ms: Option<i64>,
+    pub sleep_awake_ms: Option<i64>,
+    pub sleep_light_ms: Option<i64>,
+    pub sleep_deep_ms: Option<i64>,
+    pub sleep_rem_ms: Option<i64>,
+    pub sleep_cycle_count: Option<i64>,
+    pub sleep_disturbance_count: Option<i64>,
+    pub sleep_need_baseline_ms: Option<i64>,
+    pub sleep_need_from_debt_ms: Option<i64>,
+    pub sleep_need_from_strain_ms: Option<i64>,
+    pub sleep_need_from_nap_ms: Option<i64>,
+    pub strain_score: Option<f64>,
+    pub strain_kilojoules: Option<f64>,
+    pub source: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+// MARK: - Sleep audio events
+
+#[derive(Debug, Clone)]
+pub struct SleepAudioEventInput<'a> {
+    pub event_id: &'a str,
+    pub started_at_ms: i64,
+    pub duration_ms: i64,
+    pub peak_db: f64,
+    pub kind: &'a str,
+    pub file_path: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SleepAudioEventRow {
+    pub event_id: String,
+    pub started_at_ms: i64,
+    pub duration_ms: i64,
+    pub peak_db: f64,
+    pub kind: String,
+    pub file_path: Option<String>,
+    pub created_at: String,
+}
+
 /// One-shot recovery summary returned by
 /// `recover_hr_samples_from_decoded_frames`. Diagnostic only; callers can
 /// surface this to the UI ("recovered N HR samples from decoded frames").
@@ -773,6 +852,285 @@ impl GooseStore {
                 synced_at: row.get(5)?,
                 created_at: row.get(6)?,
                 updated_at: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_unsynced_hr_samples(&self, limit: i64) -> GooseResult<Vec<HrSampleRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sample_id, captured_at_ms, bpm, source, synced_at, created_at
+             FROM hr_samples
+             WHERE synced_at IS NULL
+             ORDER BY captured_at_ms
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(HrSampleRow {
+                sample_id: row.get(0)?,
+                captured_at_ms: row.get(1)?,
+                bpm: row.get(2)?,
+                source: row.get(3)?,
+                synced_at: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn mark_hr_samples_synced(&self, sample_ids: &[String], now_ms: i64) -> GooseResult<i64> {
+        let mut total: i64 = 0;
+        for chunk in sample_ids.chunks(500) {
+            let placeholders: Vec<String> = (0..chunk.len()).map(|_| "?".to_string()).collect();
+            let sql = format!(
+                "UPDATE hr_samples SET synced_at = ?1 WHERE sample_id IN ({})",
+                placeholders.join(",")
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let mut params_vec: Vec<rusqlite::types::Value> = vec![now_ms.into()];
+            for id in chunk {
+                params_vec.push(id.clone().into());
+            }
+            let n = stmt.execute(rusqlite::params_from_iter(params_vec.into_iter()))?;
+            total += n as i64;
+        }
+        Ok(total)
+    }
+
+    pub fn list_unsynced_daily_summaries(&self, limit: i64) -> GooseResult<Vec<ImportedDailySummaryRow>> {
+        // Daily summaries don't have synced_at — treat as "always send the
+        // most recently updated" by ordering on updated_at and capping the
+        // batch. The server's INSERT OR IGNORE keeps this safe.
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                date_key, recovery_score, hrv_rmssd_ms, resting_hr_bpm,
+                spo2_pct, skin_temp_c,
+                sleep_performance_pct, sleep_efficiency_pct,
+                sleep_in_bed_ms, sleep_awake_ms, sleep_light_ms,
+                sleep_deep_ms, sleep_rem_ms, sleep_cycle_count,
+                sleep_disturbance_count,
+                sleep_need_baseline_ms, sleep_need_from_debt_ms,
+                sleep_need_from_strain_ms, sleep_need_from_nap_ms,
+                strain_score, strain_kilojoules, source,
+                created_at, updated_at
+            FROM imported_daily_summary
+            ORDER BY updated_at DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(ImportedDailySummaryRow {
+                date_key: row.get(0)?,
+                recovery_score: row.get(1)?,
+                hrv_rmssd_ms: row.get(2)?,
+                resting_hr_bpm: row.get(3)?,
+                spo2_pct: row.get(4)?,
+                skin_temp_c: row.get(5)?,
+                sleep_performance_pct: row.get(6)?,
+                sleep_efficiency_pct: row.get(7)?,
+                sleep_in_bed_ms: row.get(8)?,
+                sleep_awake_ms: row.get(9)?,
+                sleep_light_ms: row.get(10)?,
+                sleep_deep_ms: row.get(11)?,
+                sleep_rem_ms: row.get(12)?,
+                sleep_cycle_count: row.get(13)?,
+                sleep_disturbance_count: row.get(14)?,
+                sleep_need_baseline_ms: row.get(15)?,
+                sleep_need_from_debt_ms: row.get(16)?,
+                sleep_need_from_strain_ms: row.get(17)?,
+                sleep_need_from_nap_ms: row.get(18)?,
+                strain_score: row.get(19)?,
+                strain_kilojoules: row.get(20)?,
+                source: row.get(21)?,
+                created_at: row.get(22)?,
+                updated_at: row.get(23)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_imported_daily_summary(
+        &self,
+        input: ImportedDailySummaryInput<'_>,
+    ) -> GooseResult<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO imported_daily_summary (
+                date_key, recovery_score, hrv_rmssd_ms, resting_hr_bpm,
+                spo2_pct, skin_temp_c,
+                sleep_performance_pct, sleep_efficiency_pct,
+                sleep_in_bed_ms, sleep_awake_ms, sleep_light_ms,
+                sleep_deep_ms, sleep_rem_ms, sleep_cycle_count,
+                sleep_disturbance_count,
+                sleep_need_baseline_ms, sleep_need_from_debt_ms,
+                sleep_need_from_strain_ms, sleep_need_from_nap_ms,
+                strain_score, strain_kilojoules, source
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+            )
+            ON CONFLICT(date_key) DO UPDATE SET
+                recovery_score = COALESCE(excluded.recovery_score, recovery_score),
+                hrv_rmssd_ms = COALESCE(excluded.hrv_rmssd_ms, hrv_rmssd_ms),
+                resting_hr_bpm = COALESCE(excluded.resting_hr_bpm, resting_hr_bpm),
+                spo2_pct = COALESCE(excluded.spo2_pct, spo2_pct),
+                skin_temp_c = COALESCE(excluded.skin_temp_c, skin_temp_c),
+                sleep_performance_pct = COALESCE(excluded.sleep_performance_pct, sleep_performance_pct),
+                sleep_efficiency_pct = COALESCE(excluded.sleep_efficiency_pct, sleep_efficiency_pct),
+                sleep_in_bed_ms = COALESCE(excluded.sleep_in_bed_ms, sleep_in_bed_ms),
+                sleep_awake_ms = COALESCE(excluded.sleep_awake_ms, sleep_awake_ms),
+                sleep_light_ms = COALESCE(excluded.sleep_light_ms, sleep_light_ms),
+                sleep_deep_ms = COALESCE(excluded.sleep_deep_ms, sleep_deep_ms),
+                sleep_rem_ms = COALESCE(excluded.sleep_rem_ms, sleep_rem_ms),
+                sleep_cycle_count = COALESCE(excluded.sleep_cycle_count, sleep_cycle_count),
+                sleep_disturbance_count = COALESCE(excluded.sleep_disturbance_count, sleep_disturbance_count),
+                sleep_need_baseline_ms = COALESCE(excluded.sleep_need_baseline_ms, sleep_need_baseline_ms),
+                sleep_need_from_debt_ms = COALESCE(excluded.sleep_need_from_debt_ms, sleep_need_from_debt_ms),
+                sleep_need_from_strain_ms = COALESCE(excluded.sleep_need_from_strain_ms, sleep_need_from_strain_ms),
+                sleep_need_from_nap_ms = COALESCE(excluded.sleep_need_from_nap_ms, sleep_need_from_nap_ms),
+                strain_score = COALESCE(excluded.strain_score, strain_score),
+                strain_kilojoules = COALESCE(excluded.strain_kilojoules, strain_kilojoules),
+                source = excluded.source,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            "#,
+            params![
+                input.date_key,
+                input.recovery_score,
+                input.hrv_rmssd_ms,
+                input.resting_hr_bpm,
+                input.spo2_pct,
+                input.skin_temp_c,
+                input.sleep_performance_pct,
+                input.sleep_efficiency_pct,
+                input.sleep_in_bed_ms,
+                input.sleep_awake_ms,
+                input.sleep_light_ms,
+                input.sleep_deep_ms,
+                input.sleep_rem_ms,
+                input.sleep_cycle_count,
+                input.sleep_disturbance_count,
+                input.sleep_need_baseline_ms,
+                input.sleep_need_from_debt_ms,
+                input.sleep_need_from_strain_ms,
+                input.sleep_need_from_nap_ms,
+                input.strain_score,
+                input.strain_kilojoules,
+                input.source,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn imported_daily_summaries_between(
+        &self,
+        start_date_key: &str,
+        end_date_key: &str,
+    ) -> GooseResult<Vec<ImportedDailySummaryRow>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                date_key, recovery_score, hrv_rmssd_ms, resting_hr_bpm,
+                spo2_pct, skin_temp_c,
+                sleep_performance_pct, sleep_efficiency_pct,
+                sleep_in_bed_ms, sleep_awake_ms, sleep_light_ms,
+                sleep_deep_ms, sleep_rem_ms, sleep_cycle_count,
+                sleep_disturbance_count,
+                sleep_need_baseline_ms, sleep_need_from_debt_ms,
+                sleep_need_from_strain_ms, sleep_need_from_nap_ms,
+                strain_score, strain_kilojoules, source,
+                created_at, updated_at
+            FROM imported_daily_summary
+            WHERE date_key >= ?1 AND date_key <= ?2
+            ORDER BY date_key DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![start_date_key, end_date_key], |row| {
+            Ok(ImportedDailySummaryRow {
+                date_key: row.get(0)?,
+                recovery_score: row.get(1)?,
+                hrv_rmssd_ms: row.get(2)?,
+                resting_hr_bpm: row.get(3)?,
+                spo2_pct: row.get(4)?,
+                skin_temp_c: row.get(5)?,
+                sleep_performance_pct: row.get(6)?,
+                sleep_efficiency_pct: row.get(7)?,
+                sleep_in_bed_ms: row.get(8)?,
+                sleep_awake_ms: row.get(9)?,
+                sleep_light_ms: row.get(10)?,
+                sleep_deep_ms: row.get(11)?,
+                sleep_rem_ms: row.get(12)?,
+                sleep_cycle_count: row.get(13)?,
+                sleep_disturbance_count: row.get(14)?,
+                sleep_need_baseline_ms: row.get(15)?,
+                sleep_need_from_debt_ms: row.get(16)?,
+                sleep_need_from_strain_ms: row.get(17)?,
+                sleep_need_from_nap_ms: row.get(18)?,
+                strain_score: row.get(19)?,
+                strain_kilojoules: row.get(20)?,
+                source: row.get(21)?,
+                created_at: row.get(22)?,
+                updated_at: row.get(23)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn insert_sleep_audio_event(&self, input: SleepAudioEventInput<'_>) -> GooseResult<bool> {
+        let changed = self.conn.execute(
+            r#"
+            INSERT OR IGNORE INTO sleep_audio_events
+                (event_id, started_at_ms, duration_ms, peak_db, kind, file_path)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                input.event_id,
+                input.started_at_ms,
+                input.duration_ms,
+                input.peak_db,
+                input.kind,
+                input.file_path,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn sleep_audio_events_between(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> GooseResult<Vec<SleepAudioEventRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT event_id, started_at_ms, duration_ms, peak_db, kind, file_path, created_at
+             FROM sleep_audio_events
+             WHERE started_at_ms >= ?1 AND started_at_ms < ?2
+             ORDER BY started_at_ms DESC",
+        )?;
+        let rows = stmt.query_map(params![start_ms, end_ms], |row| {
+            Ok(SleepAudioEventRow {
+                event_id: row.get(0)?,
+                started_at_ms: row.get(1)?,
+                duration_ms: row.get(2)?,
+                peak_db: row.get(3)?,
+                kind: row.get(4)?,
+                file_path: row.get(5)?,
+                created_at: row.get(6)?,
             })
         })?;
         let mut out = Vec::new();

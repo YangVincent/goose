@@ -4,21 +4,28 @@ import SwiftUI
 /// + workouts card. Top row: last night's sleep summary. Bottom rows:
 /// each completed workout. Tap a workout → WorkoutDetailView.
 struct WhoopTodayActivitiesCard: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
   @ObservedObject private var workoutStore = CompletedWorkoutStore.shared
   @ObservedObject private var sleepStore = SleepWindowStore.shared
+  @ObservedObject private var sleepSession = SleepSessionStore.shared
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
 
-      sleepRow
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.white.opacity(0.04))
-        )
+      NavigationLink {
+        SleepDetailView()
+      } label: {
+        sleepRow
+          .padding(.horizontal, 12)
+          .padding(.vertical, 10)
+          .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+              .fill(Color.white.opacity(0.04))
+          )
+      }
+      .buttonStyle(.plain)
 
       ForEach(todaysWorkouts) { workout in
         NavigationLink {
@@ -43,26 +50,52 @@ struct WhoopTodayActivitiesCard: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
 
-      if Calendar.current.isDateInToday(client.currentDate) {
-        NavigationLink {
-          LiveActivityView()
-        } label: {
-          HStack(spacing: 8) {
-            Image(systemName: "play.fill")
-              .font(.system(size: 12, weight: .heavy))
-            Text("START ACTIVITY")
-              .font(.system(size: 11, weight: .heavy, design: .rounded))
-              .tracking(1.5)
+      if Calendar.current.isDateInToday(selectedDay.currentDate) {
+        HStack(spacing: 8) {
+          NavigationLink {
+            LiveActivityView()
+          } label: {
+            HStack(spacing: 6) {
+              Image(systemName: "play.fill")
+                .font(.system(size: 11, weight: .heavy))
+              Text("START ACTIVITY")
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(1.5)
+            }
+            .foregroundStyle(.black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+              RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.95))
+            )
           }
-          .foregroundStyle(.black)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 10)
-          .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-              .fill(Color.white.opacity(0.95))
-          )
+          .buttonStyle(.plain)
+
+          Button {
+            if sleepSession.active == nil {
+              sleepSession.startSleep()
+            } else {
+              sleepSession.endSleep()
+            }
+          } label: {
+            HStack(spacing: 6) {
+              Image(systemName: sleepSession.active == nil ? "moon.fill" : "stop.fill")
+                .font(.system(size: 11, weight: .heavy))
+              Text(sleepSession.active == nil ? "START SLEEP" : "END SLEEP")
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(1.5)
+            }
+            .foregroundStyle(sleepSession.active == nil ? Color(red: 0.55, green: 0.85, blue: 1.0) : .black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+              RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(sleepSession.active == nil ? Color(red: 0.55, green: 0.85, blue: 1.0).opacity(0.18) : Color(red: 0.55, green: 0.85, blue: 1.0))
+            )
+          }
+          .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
       }
     }
     .padding(14)
@@ -121,9 +154,9 @@ struct WhoopTodayActivitiesCard: View {
   }
 
   private var sleepSubtitle: String {
-    if let stages = client.currentDay?.sleep?.stage_summary {
+    if let stages = dailyStore.dayOverview(for: selectedDay.currentDate)?.sleep?.stage_summary {
       let inBed = Self.formatMillis(stages.total_in_bed_time_milli)
-      if let performance = client.currentDay?.sleep?.performance {
+      if let performance = dailyStore.dayOverview(for: selectedDay.currentDate)?.sleep?.performance {
         return "\(inBed) in bed · \(Int(performance.rounded()))% performance"
       }
       return "\(inBed) in bed"
@@ -137,7 +170,7 @@ struct WhoopTodayActivitiesCard: View {
   }
 
   private var sleepDurationText: String {
-    if let stages = client.currentDay?.sleep?.stage_summary,
+    if let stages = dailyStore.dayOverview(for: selectedDay.currentDate)?.sleep?.stage_summary,
        let millis = stages.total_in_bed_time_milli {
       return Self.formatMillis(millis)
     }
@@ -156,7 +189,7 @@ struct WhoopTodayActivitiesCard: View {
     // Filter against the *selected* date in the date strip, not always
     // today — so tapping a previous day surfaces that day's workouts.
     let calendar = Calendar.current
-    let dayStart = calendar.startOfDay(for: client.currentDate)
+    let dayStart = calendar.startOfDay(for: selectedDay.currentDate)
     let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
     return workoutStore.workouts.filter {
       $0.startedAt >= dayStart && $0.startedAt < dayEnd

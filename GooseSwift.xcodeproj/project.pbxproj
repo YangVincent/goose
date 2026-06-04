@@ -68,7 +68,21 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
-			F100000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift */; };
+			F100000000000000000000E4 /* WhoopUI/SelectedDayStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E4 /* WhoopUI/SelectedDayStore.swift */; };
+			F100000000000000000000E3 /* WhoopUI/WhoopOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E3 /* WhoopUI/WhoopOverview.swift */; };
+			F100000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift */; };
+			F100000000000000000000E0 /* GooseOffloadClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000E0 /* GooseOffloadClient.swift */; };
+			F100000000000000000000DF /* WhoopUI/WhoopImportedDailyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000DF /* WhoopUI/WhoopImportedDailyStore.swift */; };
+			F100000000000000000000DE /* WhoopUI/LocalHealthspanCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000DE /* WhoopUI/LocalHealthspanCalculator.swift */; };
+			F100000000000000000000DD /* WhoopUI/WhoopAgeFactorTrendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000DD /* WhoopUI/WhoopAgeFactorTrendView.swift */; };
+			F100000000000000000000DC /* WhoopUI/WhoopAgeFactorCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000DC /* WhoopUI/WhoopAgeFactorCard.swift */; };
+			F100000000000000000000DB /* WhoopUI/SleepSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000DB /* WhoopUI/SleepSessionStore.swift */; };
+			F100000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift */; };
+			F100000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift */; };
+			F100000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift */; };
+			F100000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift */; };
+			F100000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift */; };
+			F100000000000000000000D4 /* WhoopUI/SleepDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D4 /* WhoopUI/SleepDetailView.swift */; };
 			F100000000000000000000D2 /* WhoopUI/CollapsibleSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */; };
 			F100000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */; };
 			F100000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */; };
@@ -113,7 +127,6 @@
 			F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */; };
 			F100000000000000000000A8 /* WhoopAgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A8 /* WhoopAgeView.swift */; };
 			F100000000000000000000A7 /* WhoopTodaySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A7 /* WhoopTodaySection.swift */; };
-			F100000000000000000000A1 /* WhoopAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A1 /* WhoopAPIClient.swift */; };
 			F100000000000000000000A2 /* WhoopHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A2 /* WhoopHomeView.swift */; };
 			F100000000000000000000A3 /* WhoopMetricDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A3 /* WhoopMetricDetailView.swift */; };
 			F100000000000000000000A4 /* WhoopScoreCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A4 /* WhoopScoreCard.swift */; };
@@ -261,7 +274,21 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
-			F200000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopActivityImporter.swift; sourceTree = "<group>"; };
+			F200000000000000000000E4 /* WhoopUI/SelectedDayStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SelectedDayStore.swift; sourceTree = "<group>"; };
+			F200000000000000000000E3 /* WhoopUI/WhoopOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopOverview.swift; sourceTree = "<group>"; };
+			F200000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseOffloadDebugRow.swift; sourceTree = "<group>"; };
+			F200000000000000000000E0 /* GooseOffloadClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseOffloadClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000DF /* WhoopUI/WhoopImportedDailyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopImportedDailyStore.swift; sourceTree = "<group>"; };
+			F200000000000000000000DE /* WhoopUI/LocalHealthspanCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/LocalHealthspanCalculator.swift; sourceTree = "<group>"; };
+			F200000000000000000000DD /* WhoopUI/WhoopAgeFactorTrendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAgeFactorTrendView.swift; sourceTree = "<group>"; };
+			F200000000000000000000DC /* WhoopUI/WhoopAgeFactorCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAgeFactorCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000DB /* WhoopUI/SleepSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepSessionStore.swift; sourceTree = "<group>"; };
+			F200000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepAudioRecorder.swift; sourceTree = "<group>"; };
+			F200000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/RecoveryFactorsDetailView.swift; sourceTree = "<group>"; };
+			F200000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepCoachDetailView.swift; sourceTree = "<group>"; };
+			F200000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopImportedSleepStore.swift; sourceTree = "<group>"; };
+			F200000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepStageEstimator.swift; sourceTree = "<group>"; };
+			F200000000000000000000D4 /* WhoopUI/SleepDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepDetailView.swift; sourceTree = "<group>"; };
 			F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/CollapsibleSection.swift; sourceTree = "<group>"; };
 			F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopTodayActivitiesCard.swift; sourceTree = "<group>"; };
 			F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopHeroDualRing.swift; sourceTree = "<group>"; };
@@ -306,7 +333,6 @@
 			F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseUploader.swift; sourceTree = "<group>"; };
 			F200000000000000000000A8 /* WhoopAgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAgeView.swift; sourceTree = "<group>"; };
 			F200000000000000000000A7 /* WhoopTodaySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopTodaySection.swift; sourceTree = "<group>"; };
-			F200000000000000000000A1 /* WhoopAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopAPIClient.swift; sourceTree = "<group>"; };
 			F200000000000000000000A2 /* WhoopHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopHomeView.swift; sourceTree = "<group>"; };
 			F200000000000000000000A3 /* WhoopMetricDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopMetricDetailView.swift; sourceTree = "<group>"; };
 			F200000000000000000000A4 /* WhoopScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopScoreCard.swift; sourceTree = "<group>"; };
@@ -578,7 +604,21 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
-				F200000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift */,
+				F200000000000000000000E4 /* WhoopUI/SelectedDayStore.swift */,
+				F200000000000000000000E3 /* WhoopUI/WhoopOverview.swift */,
+				F200000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift */,
+				F200000000000000000000E0 /* GooseOffloadClient.swift */,
+				F200000000000000000000DF /* WhoopUI/WhoopImportedDailyStore.swift */,
+				F200000000000000000000DE /* WhoopUI/LocalHealthspanCalculator.swift */,
+				F200000000000000000000DD /* WhoopUI/WhoopAgeFactorTrendView.swift */,
+				F200000000000000000000DC /* WhoopUI/WhoopAgeFactorCard.swift */,
+				F200000000000000000000DB /* WhoopUI/SleepSessionStore.swift */,
+				F200000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift */,
+				F200000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift */,
+				F200000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift */,
+				F200000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift */,
+				F200000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift */,
+				F200000000000000000000D4 /* WhoopUI/SleepDetailView.swift */,
 				F200000000000000000000D2 /* WhoopUI/CollapsibleSection.swift */,
 				F200000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift */,
 				F200000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift */,
@@ -623,7 +663,6 @@
 				F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */,
 				F200000000000000000000A8 /* WhoopAgeView.swift */,
 				F200000000000000000000A7 /* WhoopTodaySection.swift */,
-				F200000000000000000000A1 /* WhoopAPIClient.swift */,
 				F200000000000000000000A2 /* WhoopHomeView.swift */,
 				F200000000000000000000A3 /* WhoopMetricDetailView.swift */,
 				F200000000000000000000A4 /* WhoopScoreCard.swift */,
@@ -934,7 +973,21 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
-				F100000000000000000000D3 /* WhoopUI/WhoopActivityImporter.swift in Sources */,
+				F100000000000000000000E4 /* WhoopUI/SelectedDayStore.swift in Sources */,
+				F100000000000000000000E3 /* WhoopUI/WhoopOverview.swift in Sources */,
+				F100000000000000000000E1 /* WhoopUI/GooseOffloadDebugRow.swift in Sources */,
+				F100000000000000000000E0 /* GooseOffloadClient.swift in Sources */,
+				F100000000000000000000DF /* WhoopUI/WhoopImportedDailyStore.swift in Sources */,
+				F100000000000000000000DE /* WhoopUI/LocalHealthspanCalculator.swift in Sources */,
+				F100000000000000000000DD /* WhoopUI/WhoopAgeFactorTrendView.swift in Sources */,
+				F100000000000000000000DC /* WhoopUI/WhoopAgeFactorCard.swift in Sources */,
+				F100000000000000000000DB /* WhoopUI/SleepSessionStore.swift in Sources */,
+				F100000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift in Sources */,
+				F100000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift in Sources */,
+				F100000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift in Sources */,
+				F100000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift in Sources */,
+				F100000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift in Sources */,
+				F100000000000000000000D4 /* WhoopUI/SleepDetailView.swift in Sources */,
 				F100000000000000000000D2 /* WhoopUI/CollapsibleSection.swift in Sources */,
 				F100000000000000000000D1 /* WhoopUI/WhoopTodayActivitiesCard.swift in Sources */,
 				F100000000000000000000D0 /* WhoopUI/WhoopHeroDualRing.swift in Sources */,
@@ -979,7 +1032,6 @@
 				F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */,
 				F100000000000000000000A8 /* WhoopAgeView.swift in Sources */,
 				F100000000000000000000A7 /* WhoopTodaySection.swift in Sources */,
-				F100000000000000000000A1 /* WhoopAPIClient.swift in Sources */,
 				F100000000000000000000A2 /* WhoopHomeView.swift in Sources */,
 				F100000000000000000000A3 /* WhoopMetricDetailView.swift in Sources */,
 				F100000000000000000000A4 /* WhoopScoreCard.swift in Sources */,

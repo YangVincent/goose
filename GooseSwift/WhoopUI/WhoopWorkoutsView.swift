@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct WhoopWorkoutsView: View {
-  @StateObject private var client = WhoopAPIClient.shared
   @ObservedObject private var localWorkouts = CompletedWorkoutStore.shared
 
   var body: some View {
@@ -12,21 +11,17 @@ struct WhoopWorkoutsView: View {
           LazyVStack(spacing: 12) {
             header
 
-            if client.activities.isEmpty && localWorkouts.workouts.isEmpty {
-              if client.isLoading {
-                ProgressView().tint(.white).padding(.top, 40)
-              } else {
-                Text("NO ACTIVITIES")
-                  .font(.system(size: 11, weight: .heavy, design: .rounded))
-                  .tracking(2)
-                  .foregroundStyle(.white.opacity(0.4))
-                  .padding(.top, 40)
-              }
+            if localWorkouts.workouts.isEmpty {
+              Text("NO ACTIVITIES")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(2)
+                .foregroundStyle(.white.opacity(0.4))
+                .padding(.top, 40)
             }
 
-            // Local sessions land here as soon as the workout ends — no
-            // server round-trip required. Server activities follow once
-            // they've propagated through the WHOOP cloud.
+            // All workouts read from local SQLite via CompletedWorkoutStore.
+            // The historical WHOOP backfill via WhoopActivityImporter has
+            // already populated this store; runtime cloud reads are gone.
             ForEach(localWorkouts.workouts) { workout in
               NavigationLink {
                 WorkoutDetailView(workout: workout)
@@ -35,24 +30,16 @@ struct WhoopWorkoutsView: View {
               }
               .buttonStyle(.plain)
             }
-
-            ForEach(client.activities) { activity in
-              activityRow(activity)
-            }
           }
           .padding(.horizontal, 18)
           .padding(.bottom, 32)
         }
         .refreshable {
-          await client.loadActivities()
           await localWorkouts.refresh()
         }
       }
       .navigationBarHidden(true)
       .task {
-        if client.activities.isEmpty {
-          await client.loadActivities()
-        }
         await localWorkouts.refresh()
       }
     }
@@ -158,7 +145,7 @@ struct WhoopWorkoutsView: View {
           .foregroundStyle(.white)
       }
       Spacer()
-      Text("\(client.activities.count)")
+      Text("\(localWorkouts.workouts.count)")
         .font(.system(size: 13, weight: .bold, design: .rounded))
         .foregroundStyle(.white.opacity(0.6))
     }

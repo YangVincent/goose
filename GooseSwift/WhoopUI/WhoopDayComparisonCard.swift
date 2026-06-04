@@ -7,8 +7,8 @@ import SwiftUI
 /// All values are resolved with the same fallback chain as the main Home
 /// view (server first, local second), so the card works fully offline.
 struct WhoopDayComparisonCard: View {
-  @ObservedObject var client: WhoopAPIClient
-
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("TODAY VS RECENT")
@@ -124,22 +124,22 @@ struct WhoopDayComparisonCard: View {
   // MARK: - Resolvers
 
   private var todayRecovery: Double? {
-    client.currentDay?.recovery?.recovery_score
+    dailyStore.dayOverview(for: selectedDay.currentDate)?.recovery?.recovery_score
   }
   private var yesterdayRecovery: Double? {
     let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
-    return client.recoveryScore(forISODate: WhoopAPIClient.shared.isoDate(yesterday))
+    return dailyStore.recoveryScore(forISODate: selectedDay.isoDate(yesterday))
   }
   private var avg7dRecovery: Double? {
     let scores = (1..<8).compactMap { offset -> Double? in
       let d = Calendar.current.date(byAdding: .day, value: -offset, to: Date()) ?? Date()
-      return client.recoveryScore(forISODate: WhoopAPIClient.shared.isoDate(d))
+      return dailyStore.recoveryScore(forISODate: selectedDay.isoDate(d))
     }
     return scores.isEmpty ? nil : scores.reduce(0, +) / Double(scores.count)
   }
 
   private var todayStrain: Double? {
-    if let server = client.currentDay?.strain?.strain { return server }
+    if let server = dailyStore.dayOverview(for: selectedDay.currentDate)?.strain?.strain { return server }
     return DayStrainStore.shared.today?.strain
   }
   private var yesterdayStrain: Double? {
@@ -171,25 +171,25 @@ struct WhoopDayComparisonCard: View {
   }
 
   private var todayRHR: Double? {
-    if let server = client.currentDay?.recovery?.resting_heart_rate { return server }
+    if let server = dailyStore.dayOverview(for: selectedDay.currentDate)?.recovery?.resting_heart_rate { return server }
     return HeartRateSeriesStore.shared.restingEstimate()?.bpm
   }
   private var yesterdayRHR: Double? {
-    client.recoveryHistory.last?.resting_heart_rate
+    dailyStore.recoveryHistory().last?.resting_heart_rate
   }
   private var avg7dRHR: Double? {
-    let values = client.recoveryHistory.compactMap(\.resting_heart_rate).suffix(7)
+    let values = dailyStore.recoveryHistory().compactMap(\.resting_heart_rate).suffix(7)
     return values.isEmpty ? nil : Array(values).reduce(0, +) / Double(values.count)
   }
 
   private var todayHRV: Double? {
-    client.currentDay?.recovery?.hrv_rmssd_milli
+    dailyStore.dayOverview(for: selectedDay.currentDate)?.recovery?.hrv_rmssd_milli
   }
   private var yesterdayHRV: Double? {
-    client.recoveryHistory.last?.hrv_rmssd_milli
+    dailyStore.recoveryHistory().last?.hrv_rmssd_milli
   }
   private var avg7dHRV: Double? {
-    let values = client.recoveryHistory.compactMap(\.hrv_rmssd_milli).suffix(7)
+    let values = dailyStore.recoveryHistory().compactMap(\.hrv_rmssd_milli).suffix(7)
     return values.isEmpty ? nil : Array(values).reduce(0, +) / Double(values.count)
   }
 }

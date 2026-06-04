@@ -1,14 +1,15 @@
 import SwiftUI
 
 struct WhoopTodaySection: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
   let activities: [WhoopActivity]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       header
       VStack(spacing: 8) {
-        if let sleep = client.currentDay?.sleep, sleep.start != nil {
+        if let sleep = dailyStore.dayOverview(for: selectedDay.currentDate)?.sleep, sleep.start != nil {
           sleepRow(sleep)
         }
         ForEach(todaysActivities) { activity in
@@ -138,7 +139,7 @@ struct WhoopTodaySection: View {
 
   private var todaysActivities: [WhoopActivity] {
     let cal = Calendar.current
-    let target = cal.startOfDay(for: client.currentDate)
+    let target = cal.startOfDay(for: selectedDay.currentDate)
     return activities.filter { activity in
       guard let date = Self.isoFormatter.date(from: activity.date) ?? ISO8601DateFormatter().date(from: activity.date) else { return false }
       return cal.isDate(date, inSameDayAs: target)
@@ -152,7 +153,7 @@ struct WhoopTodaySection: View {
   }
 
   private var sleepTonight: SleepTarget? {
-    guard let sleep = client.currentDay?.sleep,
+    guard let sleep = dailyStore.dayOverview(for: selectedDay.currentDate)?.sleep,
           let needed = sleep.sleep_needed,
           let baseline = needed.baseline_milli else {
       return nil

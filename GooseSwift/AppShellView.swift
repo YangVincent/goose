@@ -29,15 +29,6 @@ struct AppShellView: View {
       await GooseUploader.shared.uploadNowIfStale()
       // Refresh the workout cache from Rust SQLite on every foreground.
       await CompletedWorkoutStore.shared.refresh()
-      // Backfill historical WHOOP activities into local SQLite so the
-      // phone is the source of truth for ALL workouts (local + cloud
-      // history). Idempotent — already-imported sessions are skipped.
-      if WhoopAPIClient.shared.activities.isEmpty {
-        await WhoopAPIClient.shared.loadActivities()
-      }
-      _ = await WhoopActivityImporter.importHistorical(
-        WhoopAPIClient.shared.activities
-      )
       // Recompute today's strain from local 1Hz HR samples so the strain
       // card has a value even when the server hasn't delivered one yet.
       DayStrainStore.shared.refresh()

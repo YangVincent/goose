@@ -349,6 +349,10 @@ struct MoreDebugView: View {
         HRRecoveryButton()
       }
 
+      Section("Offload to server") {
+        GooseOffloadDebugRow()
+      }
+
       Section("Overlays") {
         StrainDebugOverlayToggle()
       }

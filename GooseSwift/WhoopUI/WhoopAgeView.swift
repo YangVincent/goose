@@ -14,7 +14,6 @@ import SwiftUI
 /// This is intentionally simple and on-device so you can tune the constants
 /// without redeploying anything.
 struct WhoopAgeView: View {
-  @StateObject private var client = WhoopAPIClient.shared
   private let birthdate: Date = {
     var components = DateComponents()
     components.year = 1996
@@ -31,9 +30,7 @@ struct WhoopAgeView: View {
           header
           heroAge
           deltaBadge
-          WhoopPaceOfAgingChart(
-            client: client,
-            chronologicalAge: chronologicalAge
+          WhoopPaceOfAgingChart(chronologicalAge: chronologicalAge
           )
           factorBreakdown
           strapZoneCard
@@ -43,16 +40,10 @@ struct WhoopAgeView: View {
         .padding(.bottom, 32)
       }
       .refreshable {
-        await client.loadHealthspan()
-        await client.loadRecoveryHistory()
-      }
-    }
-    .task {
-      if client.healthspan == nil {
-        await client.loadHealthspan()
-      }
-      if client.recoveryHistory.isEmpty {
-        await client.loadRecoveryHistory()
+        // Local-only — no cloud calls at runtime. The Healthspan view
+        // pulls from CompletedWorkoutStore + HeartRateSeriesStore via
+        // LocalHealthspanCalculator, both Rust-SQLite-backed.
+        await CompletedWorkoutStore.shared.refresh()
       }
     }
   }
@@ -127,23 +118,192 @@ struct WhoopAgeView: View {
     )
   }
 
+  @ViewBuilder
   private var factorBreakdown: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text("CONTRIBUTING FACTORS")
-        .font(.system(size: 10, weight: .heavy, design: .rounded))
-        .tracking(2)
-        .foregroundStyle(.white.opacity(0.55))
-      if let est = estimate {
-        ForEach(est.factors, id: \.label) { factor in
-          factorRow(label: factor.label, delta: factor.delta, observed: factor.observed)
-        }
-      } else {
-        Text(client.healthspan == nil ? "Loading…" : "Insufficient data")
-          .font(.system(size: 13, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white.opacity(0.5))
-      }
-    }
+    let local = LocalHealthspanCalculator.compute()
+    localComputedBanner
+    sleepSection(local: local)
+    strainSection(local: local)
+    fitnessSection(local: local)
   }
+
+  private var localComputedBanner: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "iphone.gen3")
+        .font(.system(size: 11, weight: .heavy))
+        .foregroundStyle(.green)
+      Text("Computed from your local strap data")
+        .font(.system(size: 11, weight: .heavy, design: .rounded))
+        .tracking(1)
+        .foregroundStyle(.white.opacity(0.55))
+      Spacer()
+    }
+    .padding(.top, 8)
+  }
+
+  // MARK: - Sleep section
+
+  @ViewBuilder
+  private func sleepSection(local: LocalHealthspanCalculator.Healthspan) -> some View {
+    WhoopAgeSectionHeader(title: "Sleep")
+    let consistency = local.sleep_consistency_pct_30d
+    let consistencyDelta = consistency.map { clamp(-($0 - 75) * 0.18, -3, 3) } ?? 0
+    WhoopAgeFactorCard(
+      title: "SLEEP CONSISTENCY",
+      unit: "%",
+      sixMonthValue: consistency,
+      thirtyDayValue: consistency,
+      valueRange: 40...100,
+      rangeStartLabel: "40%",
+      rangeEndLabel: "100%",
+      yearsContribution: consistencyDelta,
+      higherIsBetter: true,
+      outperformingText: "You're significantly boosting your long-term health with your daily Sleep Consistency. Keep it up to maintain the lasting benefits.",
+      underperformingText: "Your sleep schedule has been drifting. Even tightening bedtime by 20–30 minutes shifts your circadian system measurably.",
+      valueFormatter: { "\(Int($0.rounded()))" },
+      trendSeries: local.dailySleepConsistency.map { TrendPoint($0) }
+    )
+
+    let sleepHours = local.sleep_hours_30d
+    let sleepHoursDelta = sleepHours.map { clamp(-($0 - 7) * 0.8, -1, 2) } ?? 0
+    WhoopAgeFactorCard(
+      title: "HOURS OF SLEEP",
+      unit: "h",
+      sixMonthValue: sleepHours,
+      thirtyDayValue: sleepHours,
+      valueRange: 5...8,
+      rangeStartLabel: "5h",
+      rangeEndLabel: "8h",
+      yearsContribution: sleepHoursDelta,
+      higherIsBetter: true,
+      outperformingText: "You're hitting your sleep need consistently — this is one of the strongest long-term health levers.",
+      underperformingText: "You're under your sleep need most nights. Even one extra hour averaged over a week translates to measurable HRV and recovery gains.",
+      trendSeries: local.dailySleepHours.map { TrendPoint($0) }
+    )
+  }
+
+  // MARK: - Strain section
+
+  @ViewBuilder
+  private func strainSection(local: LocalHealthspanCalculator.Healthspan) -> some View {
+    WhoopAgeSectionHeader(title: "Strain")
+    let z13: Double? = local.hr_zones_1_3_weekly_hours
+    let z13Delta = z13.map { clamp(-($0 - 0.5) * 0.4, -1.5, 1.5) } ?? 0
+    WhoopAgeFactorCard(
+      title: "TIME IN HR ZONES 1-3 (WEEKLY)",
+      unit: "h",
+      sixMonthValue: z13,
+      thirtyDayValue: z13,
+      valueRange: 0...5,
+      rangeStartLabel: "0h",
+      rangeEndLabel: "5h",
+      yearsContribution: z13Delta,
+      higherIsBetter: true,
+      outperformingText: "Easy aerobic time builds your mitochondrial base — this is where long-term cardiac health is bought.",
+      underperformingText: z13 == 0 ? "0h of zone 1-3 work this week from your tracked Goose workouts. Two 30-min easy walks per week change the slope of this curve." : "You're under-doing easy aerobic work. Two 30-min easy walks per week change the slope of this curve.",
+      trendSeries: local.dailyHrZones13.map { TrendPoint($0) }
+    )
+
+    let z45: Double? = local.hr_zones_4_5_weekly_hours
+    let z45Delta = z45.map { clamp(-($0) * 0.2, -0.5, 0.5) } ?? 0
+    WhoopAgeFactorCard(
+      title: "TIME IN HR ZONES 4-5 (WEEKLY)",
+      unit: "h",
+      sixMonthValue: z45,
+      thirtyDayValue: z45,
+      valueRange: 0...1,
+      rangeStartLabel: "0h",
+      rangeEndLabel: "1h",
+      yearsContribution: z45Delta,
+      higherIsBetter: true,
+      outperformingText: "High-intensity work is preserving your VO₂max ceiling — the strongest single mortality predictor at any age.",
+      underperformingText: z45 == 0 ? "0h of zone 4-5 work this week from your tracked Goose workouts. Two short hard intervals per week (5×3 min) move this needle quickly." : "Two short hard intervals per week (5×3 min) move this needle quickly.",
+      trendSeries: local.dailyHrZones45.map { TrendPoint($0) }
+    )
+
+    let strengthMin: Double? = local.strength_weekly_minutes
+    let strengthHours = strengthMin.map { $0 / 60.0 }
+    let strengthDelta = strengthHours.map { clamp(-($0 - 1.0) * 0.6, -1.0, 1.0) } ?? 0
+    WhoopAgeFactorCard(
+      title: "STRENGTH ACTIVITY TIME (WEEKLY)",
+      unit: "h",
+      sixMonthValue: strengthHours,
+      thirtyDayValue: strengthHours,
+      valueRange: 0...2,
+      rangeStartLabel: "0h",
+      rangeEndLabel: "2h",
+      yearsContribution: strengthDelta,
+      higherIsBetter: true,
+      outperformingText: "Resistance training preserves lean mass and bone density — both decline with age and matter more than HRV after 40.",
+      underperformingText: (strengthHours ?? 0) == 0 ? "0 minutes of strength workouts in Goose this week. Two 30-min resistance sessions weekly cover the minimum dose." : "Two 30-minute resistance sessions weekly cover the minimum dose for healthspan gains.",
+      trendSeries: local.dailyStrengthMinutes.map { TrendPoint($0) }
+    )
+
+    // Steps not in cloud API yet — placeholder card with explanation.
+    WhoopAgeFactorCard(
+      title: "STEPS",
+      unit: "steps",
+      sixMonthValue: nil,
+      thirtyDayValue: nil,
+      valueRange: 0...16000,
+      rangeStartLabel: "0K",
+      rangeEndLabel: "16K",
+      yearsContribution: 0,
+      higherIsBetter: true,
+      outperformingText: "Steps tracking not yet captured from the strap. The Goose IMU pipeline lands shortly.",
+      underperformingText: nil
+    )
+  }
+
+  // MARK: - Fitness section
+
+  @ViewBuilder
+  private func fitnessSection(local: LocalHealthspanCalculator.Healthspan) -> some View {
+    WhoopAgeSectionHeader(title: "Fitness")
+    // VO2 max: no local estimator yet. Surface as unmeasured rather than
+    // falling back to cloud — local computation lands as a follow-up.
+    let vo2: Double? = nil
+    let vo2Delta: Double = 0
+    WhoopAgeFactorCard(
+      title: "VO₂ MAX",
+      unit: "ml/kg/min",
+      sixMonthValue: vo2,
+      thirtyDayValue: vo2,
+      valueRange: 15...70,
+      rangeStartLabel: "15",
+      rangeEndLabel: "70",
+      yearsContribution: vo2Delta,
+      higherIsBetter: true,
+      outperformingText: "Local VO₂max estimator from running pace + HR isn't wired yet — landing as a follow-up. Until then, this card is unmeasured.",
+      underperformingText: "Local VO₂max estimator from running pace + HR isn't wired yet — landing as a follow-up. Until then, this card is unmeasured.",
+      valueFormatter: { String(format: "%.0f", $0) }
+    )
+
+    let rhr = local.rhr_30d
+    let rhrDelta = rhr.map { clamp(($0 - 50) * 0.5, -2.0, 2.0) } ?? 0
+    WhoopAgeFactorCard(
+      title: "RHR",
+      unit: "bpm",
+      sixMonthValue: rhr,
+      thirtyDayValue: rhr,
+      valueRange: 40...80,
+      rangeStartLabel: "40bpm",
+      rangeEndLabel: "80bpm",
+      yearsContribution: rhrDelta,
+      higherIsBetter: false,
+      outperformingText: "You're significantly boosting your long-term health with your daily RHR. Keep it up to maintain the lasting benefits.",
+      underperformingText: "Elevated RHR is one of the earliest signs of cardiovascular strain. Improving aerobic base drops this in 4-6 weeks.",
+      valueFormatter: { String(format: "%.0f", $0) },
+      trendSeries: local.dailyRHR.map { TrendPoint($0) }
+    )
+  }
+
+  /// Bridge from a LocalHealthspanCalculator DailyPoint to the trend
+  /// view's TrendPoint type, keeping the call sites tidy.
+  private func TrendPoint(_ point: LocalHealthspanCalculator.DailyPoint) -> WhoopAgeFactorTrendView.TrendPoint {
+    WhoopAgeFactorTrendView.TrendPoint(date: point.date, value: point.value)
+  }
+
 
   private func factorRow(label: String, delta: Double, observed: String) -> some View {
     HStack {
@@ -242,7 +402,7 @@ struct WhoopAgeView: View {
   /// to the next sample to its own zone (capped at 60 seconds so a long
   /// disconnect doesn't blow up totals).
   private func strapZoneBucketsForToday() -> [Int: Double] {
-    let maxHR = Double(client.healthspan?.max_hr ?? UserProfile.maxHeartRate)
+    let maxHR = Double(UserProfile.maxHeartRate)
     let samples = HeartRateSeriesStore.shared.samples(forDayContaining: Date())
     guard samples.count > 1 else { return [:] }
     var buckets: [Int: Double] = [:]
@@ -322,16 +482,17 @@ struct WhoopAgeView: View {
   /// (typically -0.4 + -1.9 years for an athletic 30-year-old) are
   /// surfaced as a single "(unmeasured)" placeholder so the math is honest.
   private var estimate: AgeEstimate? {
-    guard let h = client.healthspan,
-          let consistency = h.sleep_consistency_pct_30d,
-          let sleepHours = h.sleep_hours_30d,
-          let rhr = h.rhr_30d else {
+    // All inputs from local computation — no cloud reads.
+    let local = LocalHealthspanCalculator.compute()
+    guard let consistency = local.sleep_consistency_pct_30d,
+          let sleepHours = local.sleep_hours_30d,
+          let rhr = local.rhr_30d else {
       return nil
     }
 
-    let zones13 = h.hr_zones_1_3_weekly_hours ?? 0
-    let zones45 = h.hr_zones_4_5_weekly_hours ?? 0
-    let strengthHours = (h.strength_weekly_minutes ?? 0) / 60.0
+    let zones13 = local.hr_zones_1_3_weekly_hours
+    let zones45 = local.hr_zones_4_5_weekly_hours
+    let strengthHours = local.strength_weekly_minutes / 60.0
 
     var factors: [AgeEstimate.Factor] = []
 
@@ -380,14 +541,13 @@ struct WhoopAgeView: View {
       delta: rhrDelta
     ))
 
-    if let vo2 = h.vo2_max_estimate {
-      let vo2Delta = clamp(-(vo2 - 45) * 0.2, -3.0, 3.0)
-      factors.append(.init(
-        label: "VO₂ MAX",
-        observed: String(format: "%.0f ml/kg/min (est)", vo2),
-        delta: vo2Delta
-      ))
-    }
+    // VO₂ max: local estimator not implemented yet — listed as
+    // unmeasured rather than read from cloud.
+    factors.append(.init(
+      label: "VO₂ MAX",
+      observed: "Not yet computed locally",
+      delta: 0
+    ))
 
     factors.append(.init(
       label: "STEPS",

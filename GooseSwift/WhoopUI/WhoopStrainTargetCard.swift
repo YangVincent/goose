@@ -10,7 +10,8 @@ import SwiftUI
 /// Surfaces "X more to hit minimum target" given today's accumulated
 /// strain from `DayStrainStore` — so you know whether you've done enough.
 struct WhoopStrainTargetCard: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var selectedDay = SelectedDayStore.shared
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
   @ObservedObject var dayStrain: DayStrainStore = .shared
 
   var body: some View {
@@ -116,15 +117,15 @@ struct WhoopStrainTargetCard: View {
   // MARK: - Recovery resolution (mirror of WhoopHomeView's logic)
 
   private var resolvedRecoveryScore: Int? {
-    if let score = client.currentDay?.recovery?.recovery_score, score >= 0 {
+    if let score = dailyStore.summary(for: selectedDay.currentDate)?.recoveryScore, score >= 0 {
       return Int(score.rounded())
     }
-    let hrvSeries = client.recoveryHistory.compactMap(\.hrv_rmssd_milli)
-    var rhrSeries = client.recoveryHistory.compactMap(\.resting_heart_rate)
+    let hrvSeries = dailyStore.byDate.values.compactMap { $0.hrvRmssdMs }
+    var rhrSeries = dailyStore.byDate.values.compactMap { $0.restingHrBpm }
     if let local = HeartRateSeriesStore.shared.restingEstimate() {
       rhrSeries.append(local.bpm)
     }
-    let sleep = client.currentDay?.sleep?.performance
+    let sleep = dailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct
     guard hrvSeries.count >= 4 || rhrSeries.count >= 4 else { return nil }
     let score = GooseRecoveryCalculator.compute(
       hrvSeries: hrvSeries,
@@ -135,7 +136,7 @@ struct WhoopStrainTargetCard: View {
   }
 
   private var currentStrain: Double {
-    if let server = client.currentDay?.strain?.strain, server > 0 {
+    if let server = dailyStore.summary(for: selectedDay.currentDate)?.strainScore, server > 0 {
       return server
     }
     return dayStrain.today?.strain ?? 0

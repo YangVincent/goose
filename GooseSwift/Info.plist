@@ -45,6 +45,8 @@
 	<string>Goose uses background location to keep tracking outdoor workout routes, pace, and distance when you minimize the app.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Goose uses location to record outdoor workout routes, pace, distance, and elevation.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Goose listens for snoring and ambient noise during your detected sleep window. Only sleep audio events are kept; the rest is discarded.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
@@ -64,6 +66,7 @@
 	<array>
 		<string>bluetooth-central</string>
 		<string>location</string>
+		<string>audio</string>
 	</array>
 </dict>
 </plist>

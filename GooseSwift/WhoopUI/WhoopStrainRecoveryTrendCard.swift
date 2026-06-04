@@ -12,7 +12,7 @@ import SwiftUI
 /// by zone), strain on bottom (scaled to 0–21). A balanced day has both
 /// bars short, an over-trained day has tall strain + short recovery.
 struct WhoopStrainRecoveryTrendCard: View {
-  @ObservedObject var client: WhoopAPIClient
+  @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
   @State private var days: [DaySnapshot] = []
 
   struct DaySnapshot: Identifiable {
@@ -42,7 +42,7 @@ struct WhoopStrainRecoveryTrendCard: View {
         .fill(Color.white.opacity(0.04))
     )
     .onAppear { refresh() }
-    .onChange(of: client.calendar?.month ?? "") { _, _ in refresh() }
+    .onChange(of: "") { _, _ in refresh() }
   }
 
   private var header: some View {
@@ -171,7 +171,7 @@ struct WhoopStrainRecoveryTrendCard: View {
     }
     days = dates.map { date in
       let iso = Self.isoDate(date)
-      let recovery = client.recoveryScore(forISODate: iso).map { Int($0.rounded()) }
+      let recovery = dailyStore.recoveryScore(forISODate: iso).map { Int($0.rounded()) }
       let strain = computeLocalStrain(for: date)
       return DaySnapshot(id: iso, recoveryScore: recovery, strain: strain, date: date)
     }

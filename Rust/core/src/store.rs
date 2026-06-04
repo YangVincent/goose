@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 14;
+pub const CURRENT_SCHEMA_VERSION: i64 = 16;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -158,7 +158,7 @@ const ALLOWED_SLEEP_CORRECTION_LABEL_TYPES: [&str; 5] = [
 
 #[derive(Debug)]
 pub struct GooseStore {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 #[derive(Debug, Clone)]
@@ -1419,7 +1419,118 @@ impl GooseStore {
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (12);
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (13);
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (14);
-            PRAGMA user_version = 14;
+
+            -- v15: Swift-side data caches consolidated into SQLite. Replaces
+            -- heart-rate-samples.json, sensor-samples.json, step-estimates.json,
+            -- r17-samples.json, imu-samples.json. All include synced_at NULL
+            -- columns so a future one-way sync daemon can drain them to the
+            -- server.
+
+            CREATE TABLE IF NOT EXISTS hr_samples (
+                sample_id TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                bpm INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_hr_samples_captured_at
+                ON hr_samples(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_hr_samples_unsynced
+                ON hr_samples(synced_at) WHERE synced_at IS NULL;
+
+            CREATE TABLE IF NOT EXISTS sensor_samples (
+                sample_id TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                bpm INTEGER,
+                rr_intervals_ms TEXT,
+                ppg_green INTEGER,
+                ppg_red_ir INTEGER,
+                spo2_red INTEGER,
+                spo2_ir INTEGER,
+                spo2_pct INTEGER,
+                skin_temp_raw INTEGER,
+                ambient_light INTEGER,
+                led_drive_1 INTEGER,
+                led_drive_2 INTEGER,
+                signal_quality INTEGER,
+                skin_contact INTEGER,
+                accel_gravity TEXT,
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sensor_samples_captured_at
+                ON sensor_samples(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_sensor_samples_unsynced
+                ON sensor_samples(synced_at) WHERE synced_at IS NULL;
+
+            CREATE TABLE IF NOT EXISTS step_days (
+                date_key TEXT PRIMARY KEY,
+                active_seconds REAL NOT NULL,
+                estimated_steps REAL NOT NULL,
+                packet_count INTEGER NOT NULL,
+                last_updated_ms INTEGER NOT NULL,
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS raw_r17_packets (
+                packet_id TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                flags INTEGER,
+                sample_count INTEGER,
+                channels_or_gain TEXT,
+                samples_min INTEGER,
+                samples_max INTEGER,
+                samples_sum INTEGER,
+                samples_blob BLOB NOT NULL,
+                source TEXT NOT NULL,
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_raw_r17_captured_at
+                ON raw_r17_packets(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_raw_r17_unsynced
+                ON raw_r17_packets(synced_at) WHERE synced_at IS NULL;
+
+            CREATE TABLE IF NOT EXISTS raw_imu_packets (
+                packet_id TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                heart_rate_bpm INTEGER,
+                axes_meta_json TEXT NOT NULL,
+                samples_blob BLOB NOT NULL,
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_raw_imu_captured_at
+                ON raw_imu_packets(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_raw_imu_unsynced
+                ON raw_imu_packets(synced_at) WHERE synced_at IS NULL;
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (15);
+
+            -- v16: HRV samples. Goose's HRVSeriesStore used to write to
+            -- hrv-samples.json; this is the SQLite replacement.
+
+            CREATE TABLE IF NOT EXISTS hrv_samples (
+                sample_id TEXT PRIMARY KEY,
+                captured_at_ms INTEGER NOT NULL,
+                rmssd_ms REAL NOT NULL,
+                rr_interval_count INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                synced_at INTEGER,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_hrv_samples_captured_at
+                ON hrv_samples(captured_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_hrv_samples_unsynced
+                ON hrv_samples(synced_at) WHERE synced_at IS NULL;
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (16);
+            PRAGMA user_version = 16;
             "#,
         )?;
         self.ensure_raw_evidence_columns()?;
@@ -1954,7 +2065,42 @@ impl GooseStore {
             input.parser_version,
             warnings_json
         ])?;
+
+        // Side-effect: mirror any HR byte in this frame into hr_samples so
+        // HeartRateSeriesStore + DayStrainCalculator see live data without
+        // a separate decoder path. INSERT OR IGNORE makes this safe to run
+        // on every frame insert. The two tables can never drift because
+        // they're written in the same scope.
+        if changed > 0
+            && let Some(payload) = input.parsed.parsed_payload.as_ref()
+            && let Some(bpm) = extract_hr_bpm_from_payload(payload)
+            && (20..=240).contains(&bpm)
+            && let Some(captured_at_ms) = self.captured_at_ms_for_evidence(input.evidence_id)?
+        {
+            let sample_id = format!("frame.{}.{}", input.frame_id, captured_at_ms);
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO hr_samples (sample_id, captured_at_ms, bpm, source)
+                 VALUES (?1, ?2, ?3, 'decoded_frames.live')",
+                params![sample_id, captured_at_ms, bpm],
+            );
+        }
         Ok(changed > 0)
+    }
+
+    /// Look up the captured_at timestamp on the raw_evidence row that this
+    /// decoded frame is associated with, returning it as unix milliseconds.
+    /// Used by `insert_decoded_frame` to time-stamp the mirrored hr_samples
+    /// row.
+    fn captured_at_ms_for_evidence(&self, evidence_id: &str) -> GooseResult<Option<i64>> {
+        let captured_at: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT captured_at FROM raw_evidence WHERE evidence_id = ?1",
+                params![evidence_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(captured_at.and_then(|s| crate::swift_caches::parse_iso8601_to_ms(&s)))
     }
 
     pub fn start_capture_session(&self, input: CaptureSessionInput<'_>) -> GooseResult<bool> {
@@ -7245,6 +7391,19 @@ fn capture_session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Capture
 
 fn bool_to_i64(value: bool) -> i64 {
     if value { 1 } else { 0 }
+}
+
+/// Extract an HR byte (bpm) from a parsed BLE frame payload, if present.
+/// Looks at the body_summary for `heart_rate_bpm` (K12, K18, K24) or
+/// `heart_rate` (K10, K21). Returns None when no HR byte is in the frame.
+/// Used by `insert_decoded_frame` to mirror HR into `hr_samples` as a
+/// side-effect.
+fn extract_hr_bpm_from_payload(payload: &crate::protocol::ParsedPayload) -> Option<i64> {
+    let value = serde_json::to_value(payload).ok()?;
+    let body = value.get("body_summary")?;
+    body.get("heart_rate_bpm")
+        .and_then(|v| v.as_i64())
+        .or_else(|| body.get("heart_rate").and_then(|v| v.as_i64()))
 }
 
 fn i64_to_bool(value: i64) -> bool {

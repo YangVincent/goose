@@ -345,6 +345,14 @@ struct MoreDebugView: View {
         }
       }
 
+      Section("Recovery") {
+        HRRecoveryButton()
+      }
+
+      Section("Overlays") {
+        StrainDebugOverlayToggle()
+      }
+
       Section("Diagnostics") {
         MoreInfoRow(title: "UI Coverage", value: store.uiCoverageStatus, systemImage: "rectangle.3.group", status: .pending)
         MoreInfoRow(title: "Deferred Surfaces", value: store.deferredSurfaceStatus, systemImage: "rectangle.badge.plus", status: .pending)

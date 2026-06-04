@@ -130,6 +130,12 @@ final class WorkoutLiveActivityController {
   ) -> WorkoutLiveActivityAttributes.ContentState {
     let now = Date()
     let elapsed = max(session.elapsed, 0)
+    var zoneSeconds: [Double] = [0, 0, 0, 0, 0]
+    for (zone, seconds) in session.zoneDurations {
+      guard (1...5).contains(zone) else { continue }
+      zoneSeconds[zone - 1] = seconds
+    }
+    let currentZone = heartRate.map { HeartRateZone.zoneID(for: $0) }
     return WorkoutLiveActivityAttributes.ContentState(
       status: status,
       timerStartDate: session.isActive && !session.isPaused ? now.addingTimeInterval(-elapsed) : nil,
@@ -140,7 +146,9 @@ final class WorkoutLiveActivityController {
       activeCalories: max(Int(elapsed / 8), 0),
       distanceMeters: distanceMeters > 0 ? distanceMeters : nil,
       isPaused: session.isPaused,
-      updatedAt: now
+      updatedAt: now,
+      currentZone: currentZone,
+      zoneSecondsZ1Z5: zoneSeconds
     )
   }
 

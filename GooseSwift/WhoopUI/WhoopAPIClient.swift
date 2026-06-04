@@ -167,6 +167,12 @@ final class WhoopAPIClient: ObservableObject {
       lastFetchedAt = Date()
       lastError = nil
     } catch {
+      // URLError.cancelled fires whenever the parent view's .task is
+      // invalidated mid-fetch (navigation, re-mount). It's never a real
+      // failure — swallow it so the UI doesn't flash a misleading banner.
+      if (error as? URLError)?.code == .cancelled || error is CancellationError {
+        return
+      }
       lastError = "loadDay(\(dateStr)) failed: \(error.localizedDescription)"
     }
   }

@@ -86,9 +86,76 @@ private struct WorkoutLiveActivityLockScreenView: View {
         WorkoutLiveActivityMetricRow(attributes: context.attributes, state: context.state)
         Spacer(minLength: 0)
       }
+
+      WorkoutLiveActivityZoneBar(state: context.state)
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 14)
+  }
+}
+
+private struct WorkoutLiveActivityZoneBar: View {
+  let state: WorkoutLiveActivityAttributes.ContentState
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 4) {
+        ForEach(1...5, id: \.self) { zone in
+          zonePip(zone)
+        }
+      }
+      HStack(spacing: 0) {
+        ForEach(1...5, id: \.self) { zone in
+          Text(label(zone))
+            .font(.system(size: 9, weight: .heavy, design: .rounded).monospacedDigit())
+            .foregroundStyle(WorkoutLiveActivityStyle.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+    }
+  }
+
+  private func zonePip(_ zone: Int) -> some View {
+    let isCurrent = state.currentZone == zone
+    let seconds = state.zoneSecondsZ1Z5[zone - 1]
+    let totalRecorded = max(state.zoneSecondsZ1Z5.reduce(0, +), 1)
+    let share = seconds / totalRecorded
+    return ZStack(alignment: .leading) {
+      RoundedRectangle(cornerRadius: 3, style: .continuous)
+        .fill(zoneColor(zone).opacity(isCurrent ? 0.55 : 0.18))
+      GeometryReader { geo in
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+          .fill(zoneColor(zone))
+          .frame(width: max(geo.size.width * share, share > 0 ? 2 : 0))
+      }
+    }
+    .frame(height: isCurrent ? 12 : 8)
+    .overlay(
+      RoundedRectangle(cornerRadius: 3, style: .continuous)
+        .stroke(isCurrent ? Color.white.opacity(0.85) : .clear, lineWidth: 1.2)
+    )
+  }
+
+  private func label(_ zone: Int) -> String {
+    let seconds = state.zoneSecondsZ1Z5[zone - 1]
+    let total = Int(seconds.rounded())
+    if total >= 3600 {
+      return String(format: "Z%d %dh%02dm", zone, total / 3600, (total % 3600) / 60)
+    }
+    if total >= 60 {
+      return String(format: "Z%d %dm", zone, total / 60)
+    }
+    return total > 0 ? String(format: "Z%d %ds", zone, total) : "Z\(zone)"
+  }
+
+  private func zoneColor(_ zone: Int) -> Color {
+    switch zone {
+    case 1: Color(red: 0.40, green: 0.65, blue: 1.0)    // blue
+    case 2: Color(red: 0.30, green: 0.85, blue: 0.55)   // green
+    case 3: Color(red: 1.0, green: 0.88, blue: 0.40)    // yellow
+    case 4: Color(red: 1.0, green: 0.55, blue: 0.20)    // orange
+    default: Color(red: 1.0, green: 0.30, blue: 0.30)   // red
+    }
   }
 }
 

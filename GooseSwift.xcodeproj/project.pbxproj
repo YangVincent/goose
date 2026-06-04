@@ -68,6 +68,42 @@
 		A10000000000000000000006 /* GooseRustBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GooseRustBridge.swift */; };
 		A10000000000000000000007 /* GooseHello.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* GooseHello.swift */; };
 		A10000000000000000000008 /* GooseBLEClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* GooseBLEClient.swift */; };
+			F100000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift */; };
+			F100000000000000000000CE /* WhoopUI/DataRecoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CE /* WhoopUI/DataRecoveryView.swift */; };
+			F100000000000000000000CD /* WhoopUI/HRRecoveryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CD /* WhoopUI/HRRecoveryButton.swift */; };
+			F100000000000000000000CC /* WhoopUI/WorkoutRouteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CC /* WhoopUI/WorkoutRouteView.swift */; };
+			F100000000000000000000CB /* WhoopUI/UnitFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CB /* WhoopUI/UnitFormatting.swift */; };
+			F100000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift */; };
+			F100000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift */; };
+			F100000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift */; };
+			F100000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift */; };
+			F100000000000000000000C6 /* WhoopUI/JournalEntryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C6 /* WhoopUI/JournalEntryCard.swift */; };
+			F100000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift */; };
+			F100000000000000000000C4 /* WhoopUI/WorkoutHRHistogramView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C4 /* WhoopUI/WorkoutHRHistogramView.swift */; };
+			F100000000000000000000C3 /* WhoopUI/WhoopDayComparisonCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C3 /* WhoopUI/WhoopDayComparisonCard.swift */; };
+			F100000000000000000000C2 /* WhoopUI/WhoopStrainTargetCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C2 /* WhoopUI/WhoopStrainTargetCard.swift */; };
+			F100000000000000000000C1 /* WhoopUI/WhoopRecoveryBreakdownCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C1 /* WhoopUI/WhoopRecoveryBreakdownCard.swift */; };
+			F100000000000000000000C0 /* WhoopUI/SleepWindowDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C0 /* WhoopUI/SleepWindowDetector.swift */; };
+			F100000000000000000000BF /* WhoopUI/WorkoutHRTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000BF /* WhoopUI/WorkoutHRTimelineView.swift */; };
+			F100000000000000000000BE /* WhoopUI/AppleHealthExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000BE /* WhoopUI/AppleHealthExportView.swift */; };
+			F100000000000000000000BD /* WhoopUI/GooseHealthKitExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000BD /* WhoopUI/GooseHealthKitExporter.swift */; };
+			F100000000000000000000BC /* WhoopUI/GooseRecoveryCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000BC /* WhoopUI/GooseRecoveryCalculator.swift */; };
+			F100000000000000000000BB /* WhoopUI/WhoopPaceOfAgingChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000BB /* WhoopUI/WhoopPaceOfAgingChart.swift */; };
+			F100000000000000000000BA /* WhoopUI/WhoopStrainRecoveryTrendCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000BA /* WhoopUI/WhoopStrainRecoveryTrendCard.swift */; };
+			F100000000000000000000B9 /* WhoopUI/WhoopHRMaxAdvisoryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B9 /* WhoopUI/WhoopHRMaxAdvisoryCard.swift */; };
+			F100000000000000000000B8 /* WhoopUI/PersonalHRPeakDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B8 /* WhoopUI/PersonalHRPeakDetector.swift */; };
+			F100000000000000000000B7 /* WhoopUI/WhoopSleepEnvironmentCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B7 /* WhoopUI/WhoopSleepEnvironmentCard.swift */; };
+			F100000000000000000000B6 /* WhoopUI/DayStrainCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B6 /* WhoopUI/DayStrainCalculator.swift */; };
+			F100000000000000000000B5 /* WhoopUI/CompletedWorkoutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B5 /* WhoopUI/CompletedWorkoutStore.swift */; };
+			F100000000000000000000B4 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B4 /* UserProfile.swift */; };
+			F100000000000000000000B3 /* WhoopUI/WhoopStepCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B3 /* WhoopUI/WhoopStepCard.swift */; };
+			F100000000000000000000B2 /* WhoopUI/StepEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B2 /* WhoopUI/StepEstimator.swift */; };
+			F100000000000000000000B1 /* WhoopUI/StressMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B1 /* WhoopUI/StressMonitorView.swift */; };
+			F100000000000000000000B0 /* WhoopUI/HRVAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000B0 /* WhoopUI/HRVAnalyzer.swift */; };
+			F100000000000000000000AF /* WhoopUI/SensorInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AF /* WhoopUI/SensorInspectorView.swift */; };
+			F100000000000000000000AE /* WhoopUI/WhoopLiveHRPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AE /* WhoopUI/WhoopLiveHRPill.swift */; };
+			F100000000000000000000AD /* WhoopUI/WhoopWorkoutHomeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AD /* WhoopUI/WhoopWorkoutHomeCard.swift */; };
+			F100000000000000000000AC /* WhoopUI/RawPacketStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AC /* WhoopUI/RawPacketStores.swift */; };
 			F100000000000000000000AB /* WhoopUI/SmartAlarmView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AB /* WhoopUI/SmartAlarmView.swift */; };
 			F100000000000000000000AA /* WhoopUI/SensorSampleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000AA /* WhoopUI/SensorSampleStore.swift */; };
 			F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */; };
@@ -221,6 +257,42 @@
 		A20000000000000000000006 /* GooseRustBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseRustBridge.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* GooseHello.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseHello.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* GooseBLEClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooseBLEClient.swift; sourceTree = "<group>"; };
+			F200000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StrainDebugOverlayToggle.swift; sourceTree = "<group>"; };
+			F200000000000000000000CE /* WhoopUI/DataRecoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/DataRecoveryView.swift; sourceTree = "<group>"; };
+			F200000000000000000000CD /* WhoopUI/HRRecoveryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/HRRecoveryButton.swift; sourceTree = "<group>"; };
+			F200000000000000000000CC /* WhoopUI/WorkoutRouteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WorkoutRouteView.swift; sourceTree = "<group>"; };
+			F200000000000000000000CB /* WhoopUI/UnitFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/UnitFormatting.swift; sourceTree = "<group>"; };
+			F200000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/DayHRTimelineCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopBedtimeRecommendationCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/NightlyHRVCalculator.swift; sourceTree = "<group>"; };
+			F200000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WorkoutDetailView.swift; sourceTree = "<group>"; };
+			F200000000000000000000C6 /* WhoopUI/JournalEntryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/JournalEntryCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StrapBatteryPanelView.swift; sourceTree = "<group>"; };
+			F200000000000000000000C4 /* WhoopUI/WorkoutHRHistogramView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WorkoutHRHistogramView.swift; sourceTree = "<group>"; };
+			F200000000000000000000C3 /* WhoopUI/WhoopDayComparisonCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopDayComparisonCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000C2 /* WhoopUI/WhoopStrainTargetCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopStrainTargetCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000C1 /* WhoopUI/WhoopRecoveryBreakdownCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopRecoveryBreakdownCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000C0 /* WhoopUI/SleepWindowDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepWindowDetector.swift; sourceTree = "<group>"; };
+			F200000000000000000000BF /* WhoopUI/WorkoutHRTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WorkoutHRTimelineView.swift; sourceTree = "<group>"; };
+			F200000000000000000000BE /* WhoopUI/AppleHealthExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/AppleHealthExportView.swift; sourceTree = "<group>"; };
+			F200000000000000000000BD /* WhoopUI/GooseHealthKitExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseHealthKitExporter.swift; sourceTree = "<group>"; };
+			F200000000000000000000BC /* WhoopUI/GooseRecoveryCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseRecoveryCalculator.swift; sourceTree = "<group>"; };
+			F200000000000000000000BB /* WhoopUI/WhoopPaceOfAgingChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopPaceOfAgingChart.swift; sourceTree = "<group>"; };
+			F200000000000000000000BA /* WhoopUI/WhoopStrainRecoveryTrendCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopStrainRecoveryTrendCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000B9 /* WhoopUI/WhoopHRMaxAdvisoryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopHRMaxAdvisoryCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000B8 /* WhoopUI/PersonalHRPeakDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/PersonalHRPeakDetector.swift; sourceTree = "<group>"; };
+			F200000000000000000000B7 /* WhoopUI/WhoopSleepEnvironmentCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopSleepEnvironmentCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000B6 /* WhoopUI/DayStrainCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/DayStrainCalculator.swift; sourceTree = "<group>"; };
+			F200000000000000000000B5 /* WhoopUI/CompletedWorkoutStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/CompletedWorkoutStore.swift; sourceTree = "<group>"; };
+			F200000000000000000000B4 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
+			F200000000000000000000B3 /* WhoopUI/WhoopStepCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopStepCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000B2 /* WhoopUI/StepEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StepEstimator.swift; sourceTree = "<group>"; };
+			F200000000000000000000B1 /* WhoopUI/StressMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StressMonitorView.swift; sourceTree = "<group>"; };
+			F200000000000000000000B0 /* WhoopUI/HRVAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/HRVAnalyzer.swift; sourceTree = "<group>"; };
+			F200000000000000000000AF /* WhoopUI/SensorInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SensorInspectorView.swift; sourceTree = "<group>"; };
+			F200000000000000000000AE /* WhoopUI/WhoopLiveHRPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopLiveHRPill.swift; sourceTree = "<group>"; };
+			F200000000000000000000AD /* WhoopUI/WhoopWorkoutHomeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopWorkoutHomeCard.swift; sourceTree = "<group>"; };
+			F200000000000000000000AC /* WhoopUI/RawPacketStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/RawPacketStores.swift; sourceTree = "<group>"; };
 			F200000000000000000000AB /* WhoopUI/SmartAlarmView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SmartAlarmView.swift; sourceTree = "<group>"; };
 			F200000000000000000000AA /* WhoopUI/SensorSampleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SensorSampleStore.swift; sourceTree = "<group>"; };
 			F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/GooseUploader.swift; sourceTree = "<group>"; };
@@ -498,6 +570,42 @@
 				A20000000000000000000006 /* GooseRustBridge.swift */,
 				A20000000000000000000007 /* GooseHello.swift */,
 				A20000000000000000000008 /* GooseBLEClient.swift */,
+				F200000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift */,
+				F200000000000000000000CE /* WhoopUI/DataRecoveryView.swift */,
+				F200000000000000000000CD /* WhoopUI/HRRecoveryButton.swift */,
+				F200000000000000000000CC /* WhoopUI/WorkoutRouteView.swift */,
+				F200000000000000000000CB /* WhoopUI/UnitFormatting.swift */,
+				F200000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift */,
+				F200000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift */,
+				F200000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift */,
+				F200000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift */,
+				F200000000000000000000C6 /* WhoopUI/JournalEntryCard.swift */,
+				F200000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift */,
+				F200000000000000000000C4 /* WhoopUI/WorkoutHRHistogramView.swift */,
+				F200000000000000000000C3 /* WhoopUI/WhoopDayComparisonCard.swift */,
+				F200000000000000000000C2 /* WhoopUI/WhoopStrainTargetCard.swift */,
+				F200000000000000000000C1 /* WhoopUI/WhoopRecoveryBreakdownCard.swift */,
+				F200000000000000000000C0 /* WhoopUI/SleepWindowDetector.swift */,
+				F200000000000000000000BF /* WhoopUI/WorkoutHRTimelineView.swift */,
+				F200000000000000000000BE /* WhoopUI/AppleHealthExportView.swift */,
+				F200000000000000000000BD /* WhoopUI/GooseHealthKitExporter.swift */,
+				F200000000000000000000BC /* WhoopUI/GooseRecoveryCalculator.swift */,
+				F200000000000000000000BB /* WhoopUI/WhoopPaceOfAgingChart.swift */,
+				F200000000000000000000BA /* WhoopUI/WhoopStrainRecoveryTrendCard.swift */,
+				F200000000000000000000B9 /* WhoopUI/WhoopHRMaxAdvisoryCard.swift */,
+				F200000000000000000000B8 /* WhoopUI/PersonalHRPeakDetector.swift */,
+				F200000000000000000000B7 /* WhoopUI/WhoopSleepEnvironmentCard.swift */,
+				F200000000000000000000B6 /* WhoopUI/DayStrainCalculator.swift */,
+				F200000000000000000000B5 /* WhoopUI/CompletedWorkoutStore.swift */,
+				F200000000000000000000B4 /* UserProfile.swift */,
+				F200000000000000000000B3 /* WhoopUI/WhoopStepCard.swift */,
+				F200000000000000000000B2 /* WhoopUI/StepEstimator.swift */,
+				F200000000000000000000B1 /* WhoopUI/StressMonitorView.swift */,
+				F200000000000000000000B0 /* WhoopUI/HRVAnalyzer.swift */,
+				F200000000000000000000AF /* WhoopUI/SensorInspectorView.swift */,
+				F200000000000000000000AE /* WhoopUI/WhoopLiveHRPill.swift */,
+				F200000000000000000000AD /* WhoopUI/WhoopWorkoutHomeCard.swift */,
+				F200000000000000000000AC /* WhoopUI/RawPacketStores.swift */,
 				F200000000000000000000AB /* WhoopUI/SmartAlarmView.swift */,
 				F200000000000000000000AA /* WhoopUI/SensorSampleStore.swift */,
 				F200000000000000000000A9 /* WhoopUI/GooseUploader.swift */,
@@ -814,6 +922,42 @@
 					A10000000000000000000006 /* GooseRustBridge.swift in Sources */,
 				A10000000000000000000007 /* GooseHello.swift in Sources */,
 				A10000000000000000000008 /* GooseBLEClient.swift in Sources */,
+				F100000000000000000000CF /* WhoopUI/StrainDebugOverlayToggle.swift in Sources */,
+				F100000000000000000000CE /* WhoopUI/DataRecoveryView.swift in Sources */,
+				F100000000000000000000CD /* WhoopUI/HRRecoveryButton.swift in Sources */,
+				F100000000000000000000CC /* WhoopUI/WorkoutRouteView.swift in Sources */,
+				F100000000000000000000CB /* WhoopUI/UnitFormatting.swift in Sources */,
+				F100000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift in Sources */,
+				F100000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift in Sources */,
+				F100000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift in Sources */,
+				F100000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift in Sources */,
+				F100000000000000000000C6 /* WhoopUI/JournalEntryCard.swift in Sources */,
+				F100000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift in Sources */,
+				F100000000000000000000C4 /* WhoopUI/WorkoutHRHistogramView.swift in Sources */,
+				F100000000000000000000C3 /* WhoopUI/WhoopDayComparisonCard.swift in Sources */,
+				F100000000000000000000C2 /* WhoopUI/WhoopStrainTargetCard.swift in Sources */,
+				F100000000000000000000C1 /* WhoopUI/WhoopRecoveryBreakdownCard.swift in Sources */,
+				F100000000000000000000C0 /* WhoopUI/SleepWindowDetector.swift in Sources */,
+				F100000000000000000000BF /* WhoopUI/WorkoutHRTimelineView.swift in Sources */,
+				F100000000000000000000BE /* WhoopUI/AppleHealthExportView.swift in Sources */,
+				F100000000000000000000BD /* WhoopUI/GooseHealthKitExporter.swift in Sources */,
+				F100000000000000000000BC /* WhoopUI/GooseRecoveryCalculator.swift in Sources */,
+				F100000000000000000000BB /* WhoopUI/WhoopPaceOfAgingChart.swift in Sources */,
+				F100000000000000000000BA /* WhoopUI/WhoopStrainRecoveryTrendCard.swift in Sources */,
+				F100000000000000000000B9 /* WhoopUI/WhoopHRMaxAdvisoryCard.swift in Sources */,
+				F100000000000000000000B8 /* WhoopUI/PersonalHRPeakDetector.swift in Sources */,
+				F100000000000000000000B7 /* WhoopUI/WhoopSleepEnvironmentCard.swift in Sources */,
+				F100000000000000000000B6 /* WhoopUI/DayStrainCalculator.swift in Sources */,
+				F100000000000000000000B5 /* WhoopUI/CompletedWorkoutStore.swift in Sources */,
+				F100000000000000000000B4 /* UserProfile.swift in Sources */,
+				F100000000000000000000B3 /* WhoopUI/WhoopStepCard.swift in Sources */,
+				F100000000000000000000B2 /* WhoopUI/StepEstimator.swift in Sources */,
+				F100000000000000000000B1 /* WhoopUI/StressMonitorView.swift in Sources */,
+				F100000000000000000000B0 /* WhoopUI/HRVAnalyzer.swift in Sources */,
+				F100000000000000000000AF /* WhoopUI/SensorInspectorView.swift in Sources */,
+				F100000000000000000000AE /* WhoopUI/WhoopLiveHRPill.swift in Sources */,
+				F100000000000000000000AD /* WhoopUI/WhoopWorkoutHomeCard.swift in Sources */,
+				F100000000000000000000AC /* WhoopUI/RawPacketStores.swift in Sources */,
 				F100000000000000000000AB /* WhoopUI/SmartAlarmView.swift in Sources */,
 				F100000000000000000000AA /* WhoopUI/SensorSampleStore.swift in Sources */,
 				F100000000000000000000A9 /* WhoopUI/GooseUploader.swift in Sources */,

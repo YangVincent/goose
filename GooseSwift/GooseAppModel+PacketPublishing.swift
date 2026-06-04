@@ -357,30 +357,49 @@ extension GooseAppModel {
       return nil
     }
     let kind = body["kind"] as? String
-    guard kind == "raw_sensor_history" || kind == "normal_history" else { return nil }
+    // K10/K21 raw motion packets carry a live BPM byte (and sometimes nothing
+    // else) — promote them to a SensorSample so Sensor Inspector fills up in
+    // real time even before a historical sync runs. Channels we don't have
+    // from this packet stay nil.
+    let isHistorical = kind == "raw_sensor_history" || kind == "normal_history"
+    let isLiveMotion = kind == "raw_motion_k10" || kind == "raw_motion_k21"
+    guard isHistorical || isLiveMotion else { return nil }
 
-    let bpm = intValue(body["heart_rate_bpm"])
-    let source = kind == "raw_sensor_history" ? "rust.k12_k24" : "rust.k18"
+    let bpm = intValue(body["heart_rate_bpm"]) ?? intValue(body["heart_rate"])
+    // For live motion packets, emit a sample even when BPM is missing — the
+    // packet itself is evidence that the strap is streaming, and Sensor
+    // Inspector uses the row's existence as a heartbeat signal.
+    let source: String = {
+      switch kind {
+      case "raw_sensor_history": "rust.k12_k24"
+      case "normal_history": "rust.k18"
+      case "raw_motion_k10": "rust.k10"
+      case "raw_motion_k21": "rust.k21"
+      default: "rust.unknown"
+      }
+    }()
     let id = "\(Int(capturedAt.timeIntervalSince1970 * 1000)).\(bpm ?? 0).\(source)"
 
-    // RawSensorHistory wraps the channels under "sensor_data" via Serde;
-    // NormalHistory has no sensor_data block today (K18 SpO₂/gravity work
-    // is still ahead). For K18 we just emit BPM.
+    // RawSensorHistory wraps the channels under "sensor_data" via Serde.
+    // NormalHistory (K18) carries spo2_pct, rr_interval_ms, accel_gravity
+    // as top-level fields after our recent extension.
     let sensor = body["sensor_data"] as? [String: Any]
-    let rrArray = body["rr_intervals_ms"] as? [Int]
+    let rrFromArray = body["rr_intervals_ms"] as? [Int]
+    let rrFromScalar = (body["rr_interval_ms"] as? Int).map { [$0] }
     let gravityArray = body["accel_gravity"] as? [Double]
+    let spo2Pct = intValue(body["spo2_pct"])
 
     return SensorSample(
       id: id,
       source: source,
       capturedAt: capturedAt,
       bpm: bpm,
-      rrIntervalsMS: rrArray,
+      rrIntervalsMS: rrFromArray ?? rrFromScalar,
       ppgGreen: intValue(sensor?["ppg_green"]),
       ppgRedIR: intValue(sensor?["ppg_red_ir"]),
       spo2Red: intValue(sensor?["spo2_red"]),
       spo2IR: intValue(sensor?["spo2_ir"]),
-      spo2Pct: nil,
+      spo2Pct: spo2Pct,
       skinTempRaw: intValue(sensor?["skin_temp_raw"]),
       ambientLight: intValue(sensor?["ambient_light"]),
       ledDrive1: intValue(sensor?["led_drive_1"]),
@@ -388,6 +407,85 @@ extension GooseAppModel {
       signalQuality: intValue(sensor?["signal_quality"]),
       skinContact: intValue(sensor?["skin_contact"]),
       accelGravity: gravityArray
+    )
+  }
+
+  /// Build an R17PacketSample from a parsed R17 body summary. Returns nil
+  /// for non-R17 frames.
+  static func extractR17Packet(
+    from parsed: [String: Any],
+    capturedAt: Date
+  ) -> R17PacketSample? {
+    guard
+      let payload = parsed["parsed_payload"] as? [String: Any],
+      payload["kind"] as? String == "data_packet",
+      let body = payload["body_summary"] as? [String: Any],
+      body["kind"] as? String == "r17_optical_or_labrador_filtered"
+    else {
+      return nil
+    }
+    let id = "\(Int(capturedAt.timeIntervalSince1970 * 1000)).r17"
+    let samplesDict = body["samples"] as? [String: Any]
+    // The full sample stream is in `samples.samples` (new field); fall back
+    // to `samples.preview` so older builds without the rebuilt Rust core
+    // still produce non-empty data.
+    let fullSamples = (samplesDict?["samples"] as? [Int])
+      ?? (samplesDict?["preview"] as? [Int])
+      ?? []
+    return R17PacketSample(
+      id: id,
+      capturedAt: capturedAt,
+      flags: intValue(body["flags"]),
+      sampleCount: intValue(body["sample_count"]),
+      channelsOrGain: (body["channels_or_gain"] as? [Int]) ?? [],
+      samplesMin: intValue(samplesDict?["min"]),
+      samplesMax: intValue(samplesDict?["max"]),
+      samplesSum: intValue(samplesDict?["sum"]) ?? 0,
+      samples: fullSamples,
+      source: "rust.r17_optical"
+    )
+  }
+
+  /// Build an IMUPacketSample from K10 or K21 raw motion body summary.
+  static func extractIMUPacket(
+    from parsed: [String: Any],
+    capturedAt: Date
+  ) -> IMUPacketSample? {
+    guard
+      let payload = parsed["parsed_payload"] as? [String: Any],
+      payload["kind"] as? String == "data_packet",
+      let body = payload["body_summary"] as? [String: Any]
+    else {
+      return nil
+    }
+    let kind = body["kind"] as? String ?? "unknown"
+    guard kind == "raw_motion_k10" || kind == "raw_motion_k21" else {
+      return nil
+    }
+
+    let id = "\(Int(capturedAt.timeIntervalSince1970 * 1000)).\(kind)"
+    let axesRaw = (body["axes"] as? [[String: Any]]) ?? []
+    let axes = axesRaw.compactMap { axisDict -> IMUPacketSample.Axis? in
+      guard let name = axisDict["name"] as? String else { return nil }
+      let fullSamples = (axisDict["samples"] as? [Int])
+        ?? (axisDict["preview"] as? [Int])
+        ?? []
+      return IMUPacketSample.Axis(
+        name: name,
+        expectedCount: intValue(axisDict["expected_count"]) ?? 0,
+        parsedCount: intValue(axisDict["parsed_count"]) ?? 0,
+        min: intValue(axisDict["min"]),
+        max: intValue(axisDict["max"]),
+        sum: intValue(axisDict["sum"]) ?? 0,
+        samples: fullSamples
+      )
+    }
+    return IMUPacketSample(
+      id: id,
+      capturedAt: capturedAt,
+      kind: kind,
+      heartRateBPM: intValue(body["heart_rate"]),
+      axes: axes
     )
   }
 
@@ -468,6 +566,7 @@ extension GooseAppModel {
 
   func handleMovementPacket(_ sample: MovementPacketSample) {
     updateMovementPacketValidation(with: sample)
+    StepEstimator.shared.ingest(sample)
     let intensityPercent = Int((sample.motionIntensity * 100).rounded())
     let movingText = sample.isMoving ? "moving" : "quiet"
     passiveActivityPacketCount += 1

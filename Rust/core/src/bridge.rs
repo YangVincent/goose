@@ -157,8 +157,13 @@ use crate::{
         observability_timeline_from_rows, packet_timeline_between,
         packet_timeline_from_decoded_frames,
     },
+    swift_caches::{
+        HrSampleInput, HrvSampleInput, RawImuAxisMeta, RawImuPacketInput,
+        RawR17PacketInput, SensorSampleInput, StepDayInput,
+    },
     ui_coverage::{UiCoverageAuditInput, run_ui_coverage_audit},
 };
+use base64::Engine;
 
 pub const BRIDGE_REQUEST_SCHEMA: &str = "goose.bridge.request.v1";
 pub const BRIDGE_RESPONSE_SCHEMA: &str = "goose.bridge.response.v1";
@@ -2488,6 +2493,72 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(list_algorithm_preferences_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        // Swift data caches (Phase 1 consolidation). Each pair is an
+        // append-row + list-range, plus a count for the inspector.
+        "swift_caches.append_hr_sample" => request_args::<SwiftHrSampleAppendArgs>(&request)
+            .and_then(swift_caches_append_hr_sample_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_hr_samples" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_hr_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.append_sensor_sample" => {
+            request_args::<SwiftSensorSampleAppendArgs>(&request)
+                .and_then(swift_caches_append_sensor_sample_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "swift_caches.list_sensor_samples" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_sensor_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.upsert_step_day" => request_args::<SwiftStepDayUpsertArgs>(&request)
+            .and_then(swift_caches_upsert_step_day_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_step_days" => request_args::<SwiftStepDayListArgs>(&request)
+            .and_then(swift_caches_list_step_days_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.append_raw_imu_packet" => {
+            request_args::<SwiftRawImuPacketAppendArgs>(&request)
+                .and_then(swift_caches_append_raw_imu_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "swift_caches.list_raw_imu_packets" => request_args::<SwiftCacheRangeLimitArgs>(&request)
+            .and_then(swift_caches_list_raw_imu_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.append_raw_r17_packet" => {
+            request_args::<SwiftRawR17PacketAppendArgs>(&request)
+                .and_then(swift_caches_append_raw_r17_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "swift_caches.list_raw_r17_packets" => request_args::<SwiftCacheRangeLimitArgs>(&request)
+            .and_then(swift_caches_list_raw_r17_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.append_hrv_sample" => request_args::<SwiftHrvSampleAppendArgs>(&request)
+            .and_then(swift_caches_append_hrv_sample_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.list_hrv_samples" => request_args::<SwiftCacheRangeArgs>(&request)
+            .and_then(swift_caches_list_hrv_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.counts" => request_args::<SwiftCacheCountsArgs>(&request)
+            .and_then(swift_caches_counts_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "swift_caches.recover_hr_from_decoded_frames" => {
+            request_args::<SwiftHrRecoveryArgs>(&request)
+                .and_then(swift_caches_recover_hr_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
         method => bridge_error(
             &request.request_id,
             "unknown_method",
@@ -7729,6 +7800,483 @@ fn escape_json_string(value: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t")
+}
+
+// MARK: - Swift caches bridge handlers
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftHrSampleAppendArgs {
+    database_path: String,
+    sample_id: String,
+    captured_at_ms: i64,
+    bpm: i64,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftHrvSampleAppendArgs {
+    database_path: String,
+    sample_id: String,
+    captured_at_ms: i64,
+    rmssd_ms: f64,
+    rr_interval_count: i64,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftCacheRangeArgs {
+    database_path: String,
+    start_time_unix_ms: i64,
+    end_time_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftCacheRangeLimitArgs {
+    database_path: String,
+    start_time_unix_ms: i64,
+    end_time_unix_ms: i64,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftCacheCountsArgs {
+    database_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftSensorSampleAppendArgs {
+    database_path: String,
+    sample_id: String,
+    captured_at_ms: i64,
+    source: String,
+    #[serde(default)]
+    bpm: Option<i64>,
+    #[serde(default)]
+    rr_intervals_ms: Option<Vec<i64>>,
+    #[serde(default)]
+    ppg_green: Option<i64>,
+    #[serde(default)]
+    ppg_red_ir: Option<i64>,
+    #[serde(default)]
+    spo2_red: Option<i64>,
+    #[serde(default)]
+    spo2_ir: Option<i64>,
+    #[serde(default)]
+    spo2_pct: Option<i64>,
+    #[serde(default)]
+    skin_temp_raw: Option<i64>,
+    #[serde(default)]
+    ambient_light: Option<i64>,
+    #[serde(default)]
+    led_drive_1: Option<i64>,
+    #[serde(default)]
+    led_drive_2: Option<i64>,
+    #[serde(default)]
+    signal_quality: Option<i64>,
+    #[serde(default)]
+    skin_contact: Option<i64>,
+    #[serde(default)]
+    accel_gravity: Option<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftStepDayUpsertArgs {
+    database_path: String,
+    date_key: String,
+    active_seconds: f64,
+    estimated_steps: f64,
+    packet_count: i64,
+    last_updated_ms: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftStepDayListArgs {
+    database_path: String,
+    #[serde(default = "default_step_day_limit")]
+    limit: i64,
+}
+
+fn default_step_day_limit() -> i64 {
+    30
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftRawImuAxisArg {
+    name: String,
+    expected_count: usize,
+    parsed_count: usize,
+    #[serde(default)]
+    min: Option<i64>,
+    #[serde(default)]
+    max: Option<i64>,
+    #[serde(default)]
+    sum: i64,
+    /// Full sample stream for this axis.
+    samples: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftRawImuPacketAppendArgs {
+    database_path: String,
+    packet_id: String,
+    captured_at_ms: i64,
+    kind: String,
+    #[serde(default)]
+    heart_rate_bpm: Option<i64>,
+    axes: Vec<SwiftRawImuAxisArg>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftRawR17PacketAppendArgs {
+    database_path: String,
+    packet_id: String,
+    captured_at_ms: i64,
+    #[serde(default)]
+    flags: Option<i64>,
+    #[serde(default)]
+    sample_count: Option<i64>,
+    #[serde(default)]
+    channels_or_gain: Vec<i64>,
+    #[serde(default)]
+    samples_min: Option<i64>,
+    #[serde(default)]
+    samples_max: Option<i64>,
+    #[serde(default)]
+    samples_sum: i64,
+    samples: Vec<i64>,
+    source: String,
+}
+
+fn pack_i16_blob(values: &[i64]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(values.len() * 2);
+    for value in values {
+        let clamped = (*value).clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+        out.extend_from_slice(&clamped.to_le_bytes());
+    }
+    out
+}
+
+fn unpack_i16_blob(blob: &[u8]) -> Vec<i64> {
+    let mut out = Vec::with_capacity(blob.len() / 2);
+    for chunk in blob.chunks_exact(2) {
+        let raw = [chunk[0], chunk[1]];
+        out.push(i16::from_le_bytes(raw) as i64);
+    }
+    out
+}
+
+fn swift_caches_append_hr_sample_bridge(
+    args: SwiftHrSampleAppendArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let inserted = store.insert_hr_sample(HrSampleInput {
+        sample_id: &args.sample_id,
+        captured_at_ms: args.captured_at_ms,
+        bpm: args.bpm,
+        source: &args.source,
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-append.v1",
+        "inserted": inserted,
+    }))
+}
+
+fn swift_caches_list_hr_samples_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.hr_samples_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.hr-samples.v1",
+        "sample_count": rows.len(),
+        "samples": rows,
+    }))
+}
+
+fn swift_caches_append_hrv_sample_bridge(
+    args: SwiftHrvSampleAppendArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let inserted = store.insert_hrv_sample(HrvSampleInput {
+        sample_id: &args.sample_id,
+        captured_at_ms: args.captured_at_ms,
+        rmssd_ms: args.rmssd_ms,
+        rr_interval_count: args.rr_interval_count,
+        source: &args.source,
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-append.v1",
+        "inserted": inserted,
+    }))
+}
+
+fn swift_caches_list_hrv_samples_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.hrv_samples_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.hrv-samples.v1",
+        "sample_count": rows.len(),
+        "samples": rows,
+    }))
+}
+
+fn swift_caches_append_sensor_sample_bridge(
+    args: SwiftSensorSampleAppendArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rr_json = args
+        .rr_intervals_ms
+        .as_ref()
+        .map(|values| serde_json::to_string(values))
+        .transpose()
+        .map_err(|err| GooseError::message(format!("encode rr: {err}")))?;
+    let gravity_json = args
+        .accel_gravity
+        .as_ref()
+        .map(|values| serde_json::to_string(values))
+        .transpose()
+        .map_err(|err| GooseError::message(format!("encode gravity: {err}")))?;
+    let inserted = store.insert_sensor_sample(SensorSampleInput {
+        sample_id: &args.sample_id,
+        captured_at_ms: args.captured_at_ms,
+        source: &args.source,
+        bpm: args.bpm,
+        rr_intervals_ms_json: rr_json.as_deref(),
+        ppg_green: args.ppg_green,
+        ppg_red_ir: args.ppg_red_ir,
+        spo2_red: args.spo2_red,
+        spo2_ir: args.spo2_ir,
+        spo2_pct: args.spo2_pct,
+        skin_temp_raw: args.skin_temp_raw,
+        ambient_light: args.ambient_light,
+        led_drive_1: args.led_drive_1,
+        led_drive_2: args.led_drive_2,
+        signal_quality: args.signal_quality,
+        skin_contact: args.skin_contact,
+        accel_gravity_json: gravity_json.as_deref(),
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-append.v1",
+        "inserted": inserted,
+    }))
+}
+
+fn swift_caches_list_sensor_samples_bridge(
+    args: SwiftCacheRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.sensor_samples_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
+    Ok(json!({
+        "schema": "goose.sensor-samples.v1",
+        "sample_count": rows.len(),
+        "samples": rows,
+    }))
+}
+
+fn swift_caches_upsert_step_day_bridge(
+    args: SwiftStepDayUpsertArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    store.upsert_step_day(StepDayInput {
+        date_key: &args.date_key,
+        active_seconds: args.active_seconds,
+        estimated_steps: args.estimated_steps,
+        packet_count: args.packet_count,
+        last_updated_ms: args.last_updated_ms,
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-upsert.v1",
+        "upserted": true,
+    }))
+}
+
+fn swift_caches_list_step_days_bridge(
+    args: SwiftStepDayListArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.step_days_recent(args.limit)?;
+    Ok(json!({
+        "schema": "goose.step-days.v1",
+        "day_count": rows.len(),
+        "days": rows,
+    }))
+}
+
+fn swift_caches_append_raw_imu_bridge(
+    args: SwiftRawImuPacketAppendArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let mut samples_blob: Vec<u8> = Vec::new();
+    let mut axes_meta: Vec<RawImuAxisMeta> = Vec::with_capacity(args.axes.len());
+    for axis in &args.axes {
+        samples_blob.extend_from_slice(&pack_i16_blob(&axis.samples));
+        let clamp_to_i16 = |v: i64| -> i16 { v.clamp(i16::MIN as i64, i16::MAX as i64) as i16 };
+        axes_meta.push(RawImuAxisMeta {
+            name: axis.name.clone(),
+            expected_count: axis.expected_count,
+            parsed_count: axis.parsed_count,
+            min: axis.min.map(clamp_to_i16),
+            max: axis.max.map(clamp_to_i16),
+            sum: axis.sum,
+        });
+    }
+    let inserted = store.insert_raw_imu_packet(RawImuPacketInput {
+        packet_id: &args.packet_id,
+        captured_at_ms: args.captured_at_ms,
+        kind: &args.kind,
+        heart_rate_bpm: args.heart_rate_bpm,
+        axes: &axes_meta,
+        samples_blob: &samples_blob,
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-append.v1",
+        "inserted": inserted,
+        "samples_bytes": samples_blob.len(),
+    }))
+}
+
+fn swift_caches_list_raw_imu_bridge(
+    args: SwiftCacheRangeLimitArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.raw_imu_packets_between(
+        args.start_time_unix_ms,
+        args.end_time_unix_ms,
+        args.limit,
+    )?;
+    let packets: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "packet_id": row.packet_id,
+                "captured_at_ms": row.captured_at_ms,
+                "kind": row.kind,
+                "heart_rate_bpm": row.heart_rate_bpm,
+                "axes": row.axes,
+                "samples_b64": base64::engine::general_purpose::STANDARD.encode(&row.samples_blob),
+                "samples_byte_count": row.samples_blob.len(),
+                "synced_at": row.synced_at,
+                "created_at": row.created_at,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "schema": "goose.raw-imu-packets.v1",
+        "packet_count": packets.len(),
+        "packets": packets,
+    }))
+}
+
+fn swift_caches_append_raw_r17_bridge(
+    args: SwiftRawR17PacketAppendArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let samples_blob = pack_i16_blob(&args.samples);
+    let channels_json = serde_json::to_string(&args.channels_or_gain)
+        .map_err(|err| GooseError::message(format!("encode r17 channels: {err}")))?;
+    let inserted = store.insert_raw_r17_packet(RawR17PacketInput {
+        packet_id: &args.packet_id,
+        captured_at_ms: args.captured_at_ms,
+        flags: args.flags,
+        sample_count: args.sample_count,
+        channels_or_gain_json: &channels_json,
+        samples_min: args.samples_min,
+        samples_max: args.samples_max,
+        samples_sum: args.samples_sum,
+        samples_blob: &samples_blob,
+        source: &args.source,
+    })?;
+    Ok(json!({
+        "schema": "goose.swift-cache-append.v1",
+        "inserted": inserted,
+        "samples_bytes": samples_blob.len(),
+    }))
+}
+
+fn swift_caches_list_raw_r17_bridge(
+    args: SwiftCacheRangeLimitArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.raw_r17_packets_between(
+        args.start_time_unix_ms,
+        args.end_time_unix_ms,
+        args.limit,
+    )?;
+    let packets: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "packet_id": row.packet_id,
+                "captured_at_ms": row.captured_at_ms,
+                "flags": row.flags,
+                "sample_count": row.sample_count,
+                "channels_or_gain": row.channels_or_gain,
+                "samples_min": row.samples_min,
+                "samples_max": row.samples_max,
+                "samples_sum": row.samples_sum,
+                "samples_b64": base64::engine::general_purpose::STANDARD.encode(&row.samples_blob),
+                "samples_byte_count": row.samples_blob.len(),
+                "source": row.source,
+                "synced_at": row.synced_at,
+                "created_at": row.created_at,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "schema": "goose.raw-r17-packets.v1",
+        "packet_count": packets.len(),
+        "packets": packets,
+    }))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SwiftHrRecoveryArgs {
+    database_path: String,
+    start_time_unix_ms: i64,
+    end_time_unix_ms: i64,
+}
+
+fn swift_caches_recover_hr_bridge(
+    args: SwiftHrRecoveryArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = store.recover_hr_samples_from_decoded_frames(
+        args.start_time_unix_ms,
+        args.end_time_unix_ms,
+    )?;
+    Ok(json!({
+        "schema": "goose.hr-recovery.v1",
+        "report": report,
+    }))
+}
+
+fn swift_caches_counts_bridge(args: SwiftCacheCountsArgs) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let hr = store.hr_sample_count()?;
+    let sensor = store.sensor_sample_count()?;
+    let sensor_last = store.most_recent_sensor_sample_at()?;
+    let raw_imu = store.raw_imu_packet_count()?;
+    let raw_r17 = store.raw_r17_packet_count()?;
+    Ok(json!({
+        "schema": "goose.swift-cache-counts.v1",
+        "hr_sample_count": hr,
+        "sensor_sample_count": sensor,
+        "sensor_most_recent_captured_at_ms": sensor_last,
+        "raw_imu_packet_count": raw_imu,
+        "raw_r17_packet_count": raw_r17,
+    }))
+}
+
+// Suppress unused warning for unpack_i16_blob — kept for completeness so
+// other consumers can decode blobs without re-implementing the loop.
+#[allow(dead_code)]
+fn _ensure_unpack_referenced(blob: &[u8]) -> Vec<i64> {
+    unpack_i16_blob(blob)
 }
 
 #[cfg(test)]

@@ -134,9 +134,16 @@ pub enum DataPacketBodySummary {
         marker_value: Option<u8>,
         /// For K18 packets, the byte at marker_offset is the BPM value directly
         /// (per OpenWhoop reverse-engineering of WHOOP 5.0/Maverick). For other
-        /// K-versions in this family (7, 9, 12, 24), the byte is a presence
-        /// marker; the BPM lives elsewhere and we don't extract it yet.
+        /// K-versions in this family (7, 9), the byte is a presence marker;
+        /// the BPM lives elsewhere and we don't extract it yet.
         heart_rate_bpm: Option<u8>,
+        /// K18 packets also carry SpO₂ % at offset 48, an RR interval at
+        /// offset 23 (if rr_control low nibble ≥ 1), and an accelerometer
+        /// gravity vector at offsets 30-42. We extract them so the on-device
+        /// pipeline has the same channels K12/K24 give us.
+        spo2_pct: Option<u8>,
+        rr_interval_ms: Option<u16>,
+        accel_gravity: Option<[f32; 3]>,
     },
     R17OpticalOrLabradorFiltered {
         flags: Option<u16>,
@@ -213,7 +220,13 @@ pub struct I16SeriesSummary {
     pub min: Option<i16>,
     pub max: Option<i16>,
     pub sum: i64,
+    /// First 8 samples — kept for backwards-compat with old summary
+    /// consumers (compact log, packet UI, capture validation).
     pub preview: Vec<i16>,
+    /// Full series. Swift persistence layer keeps the entire i16 stream so
+    /// downstream analysis (step counter, custom HRV, PPG-based recovery)
+    /// can run off-device against raw samples instead of summaries.
+    pub samples: Vec<i16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -573,18 +586,28 @@ fn parse_data_packet_body_summary(
         // quality, skin contact, gravity vector) plus BPM + RR intervals.
         // Use the richer parser, ported from OpenWhoop V12.
         12 | 24 => parse_k12_k24_body_summary(payload),
-        7 | 9 | 18 => (
-            Some(DataPacketBodySummary::NormalHistory {
-                hr_present: hr_present_marker.map(|marker| marker != 0),
-                marker_offset: hr_marker_offset,
-                marker_value: hr_present_marker,
-                heart_rate_bpm: heart_rate_bpm_for_normal_history(
-                    packet_k,
-                    hr_present_marker,
-                ),
-            }),
-            Vec::new(),
-        ),
+        7 | 9 | 18 => {
+            let (spo2_pct, rr_interval_ms, accel_gravity) = if packet_k == 18 {
+                extract_k18_extended_fields(payload)
+            } else {
+                (None, None, None)
+            };
+            (
+                Some(DataPacketBodySummary::NormalHistory {
+                    hr_present: hr_present_marker.map(|marker| marker != 0),
+                    marker_offset: hr_marker_offset,
+                    marker_value: hr_present_marker,
+                    heart_rate_bpm: heart_rate_bpm_for_normal_history(
+                        packet_k,
+                        hr_present_marker,
+                    ),
+                    spo2_pct,
+                    rr_interval_ms,
+                    accel_gravity,
+                }),
+                Vec::new(),
+            )
+        }
         17 => parse_r17_body_summary(payload),
         10 => parse_k10_raw_motion_summary(payload),
         21 => parse_k21_raw_motion_summary(payload),
@@ -701,6 +724,7 @@ fn summarize_i16_series(
                 max: None,
                 sum: 0,
                 preview: Vec::new(),
+                samples: Vec::new(),
             }),
             Vec::new(),
         );
@@ -717,6 +741,7 @@ fn summarize_i16_series(
     let mut max = None;
     let mut sum = 0i64;
     let mut preview = Vec::new();
+    let mut samples = Vec::with_capacity(parsed_count);
     for index in 0..parsed_count {
         let sample_offset = offset + index * 2;
         let value = read_i16_le(payload, sample_offset).expect("parsed_count guards bounds");
@@ -726,6 +751,7 @@ fn summarize_i16_series(
         if preview.len() < 8 {
             preview.push(value);
         }
+        samples.push(value);
     }
 
     (
@@ -738,6 +764,7 @@ fn summarize_i16_series(
             max,
             sum,
             preview,
+            samples,
         }),
         warnings,
     )
@@ -887,6 +914,45 @@ fn parse_k12_k24_body_summary(payload: &[u8]) -> (Option<DataPacketBodySummary>,
         }),
         warnings,
     )
+}
+
+/// K18-specific extension fields per OpenWhoop V18 parser:
+///   payload[23]    rr_control byte (low nibble = count of valid RR slots)
+///   payload[24:26] RR interval (u16 LE, ms) when count >= 1
+///   payload[30:42] accelerometer gravity vector (3 × f32 LE)
+///   payload[48]    SpO₂ percentage (u8 0-100)
+fn extract_k18_extended_fields(
+    payload: &[u8],
+) -> (Option<u8>, Option<u16>, Option<[f32; 3]>) {
+    let rr_interval_ms = match payload.get(23) {
+        Some(control) if (*control & 0x0f) >= 1 => read_u16_le(payload, 24),
+        _ => None,
+    };
+
+    let accel_gravity = if payload.len() >= 42 {
+        let mut gravity = [0.0f32; 3];
+        for (index, slot) in gravity.iter_mut().enumerate() {
+            let offset = 30 + index * 4;
+            if let (Some(b0), Some(b1), Some(b2), Some(b3)) = (
+                payload.get(offset).copied(),
+                payload.get(offset + 1).copied(),
+                payload.get(offset + 2).copied(),
+                payload.get(offset + 3).copied(),
+            ) {
+                *slot = f32::from_le_bytes([b0, b1, b2, b3]);
+            }
+        }
+        Some(gravity)
+    } else {
+        None
+    };
+
+    let spo2_pct = match payload.get(48).copied() {
+        Some(value) if (1..=100).contains(&value) => Some(value),
+        _ => None,
+    };
+
+    (spo2_pct, rr_interval_ms, accel_gravity)
 }
 
 /// For K18 packets the byte at hr_marker_offset is the BPM value directly

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WhoopWorkoutsView: View {
   @StateObject private var client = WhoopAPIClient.shared
+  @ObservedObject private var localWorkouts = CompletedWorkoutStore.shared
 
   var body: some View {
     NavigationStack {
@@ -11,7 +12,7 @@ struct WhoopWorkoutsView: View {
           LazyVStack(spacing: 12) {
             header
 
-            if client.activities.isEmpty {
+            if client.activities.isEmpty && localWorkouts.workouts.isEmpty {
               if client.isLoading {
                 ProgressView().tint(.white).padding(.top, 40)
               } else {
@@ -23,6 +24,18 @@ struct WhoopWorkoutsView: View {
               }
             }
 
+            // Local sessions land here as soon as the workout ends — no
+            // server round-trip required. Server activities follow once
+            // they've propagated through the WHOOP cloud.
+            ForEach(localWorkouts.workouts) { workout in
+              NavigationLink {
+                WorkoutDetailView(workout: workout)
+              } label: {
+                localWorkoutRow(workout)
+              }
+              .buttonStyle(.plain)
+            }
+
             ForEach(client.activities) { activity in
               activityRow(activity)
             }
@@ -32,6 +45,7 @@ struct WhoopWorkoutsView: View {
         }
         .refreshable {
           await client.loadActivities()
+          await localWorkouts.refresh()
         }
       }
       .navigationBarHidden(true)
@@ -39,8 +53,98 @@ struct WhoopWorkoutsView: View {
         if client.activities.isEmpty {
           await client.loadActivities()
         }
+        await localWorkouts.refresh()
       }
     }
+  }
+
+  private func localWorkoutRow(_ workout: CompletedWorkout) -> some View {
+    HStack(alignment: .center, spacing: 14) {
+      Image(systemName: Self.icon(for: workout.activityRaw))
+        .font(.system(size: 20, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: 44, height: 44)
+        .background(
+          Circle().fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.22))
+        )
+
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 6) {
+          Text(workout.activityTitle)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+          Text("LOCAL")
+            .font(.system(size: 8, weight: .heavy, design: .rounded))
+            .tracking(1)
+            .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+              RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.18))
+            )
+        }
+        Text(Self.shortDateLabel(workout.startedAt))
+          .font(.system(size: 11, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.55))
+      }
+
+      Spacer(minLength: 8)
+
+      VStack(alignment: .trailing, spacing: 3) {
+        Text(workout.maxHeartRate.map { "\($0)" } ?? "--")
+          .font(.system(size: 17, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(Color(red: 1.0, green: 0.37, blue: 0.42))
+        Text("MAX HR")
+          .font(.system(size: 9, weight: .heavy, design: .rounded))
+          .tracking(1.5)
+          .foregroundStyle(.white.opacity(0.45))
+      }
+    }
+    .padding(14)
+    .background(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .fill(Color.white.opacity(0.04))
+    )
+    .overlay(alignment: .bottom) {
+      localDetailStrip(workout)
+    }
+  }
+
+  private func localDetailStrip(_ workout: CompletedWorkout) -> some View {
+    HStack(spacing: 16) {
+      stat(label: "TIME", value: Self.shortDuration(workout.elapsedSeconds))
+      stat(label: "AVG HR", value: workout.averageHeartRate.map { "\($0)" } ?? "--")
+      if workout.distanceMeters > 5 {
+        stat(label: "DIST", value: Self.distanceText(workout.distanceMeters))
+      }
+      stat(label: "Z3-Z5", value: Self.shortDuration(
+        workout.zoneSeconds(3) + workout.zoneSeconds(4) + workout.zoneSeconds(5)
+      ))
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 14)
+    .padding(.bottom, 10)
+    .offset(y: 22)
+  }
+
+  private static func shortDateLabel(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "EEE MMM d • h:mm a"
+    return formatter.string(from: date)
+  }
+
+  private static func shortDuration(_ seconds: Double) -> String {
+    let total = Int(seconds.rounded())
+    if total >= 3600 {
+      return String(format: "%dh%02dm", total / 3600, (total % 3600) / 60)
+    }
+    if total >= 60 {
+      return "\(total / 60)m"
+    }
+    return "\(total)s"
   }
 
   private var header: some View {
@@ -153,8 +257,7 @@ struct WhoopWorkoutsView: View {
   }
 
   private static func distanceText(_ meters: Double) -> String {
-    if meters >= 1000 { return String(format: "%.1f km", meters / 1000) }
-    return String(format: "%.0f m", meters)
+    UnitFormatting.distanceCompact(meters: meters)
   }
 
   private static let isoFormatter: ISO8601DateFormatter = {

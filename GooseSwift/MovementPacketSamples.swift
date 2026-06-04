@@ -67,8 +67,8 @@ struct MovementPacketSample {
             gyroscopePeakRange = max(gyroscopePeakRange, range)
           }
         }
-      } else if let preview = axis["preview"] as? [Any] {
-        for value in preview.compactMap({ intValue($0) }) {
+      } else if let series = (axis["samples"] as? [Any]) ?? (axis["preview"] as? [Any]) {
+        for value in series.compactMap({ intValue($0) }) {
           rawPeakAbs = max(rawPeakAbs, Double(abs(value)))
         }
       }

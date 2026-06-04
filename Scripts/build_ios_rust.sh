@@ -11,6 +11,13 @@ if [[ "${GOOSE_SKIP_RUST_CORE_BUILD:-0}" == "1" ]]; then
   exit 0
 fi
 
+# Prefer rustup-managed toolchain (newer) over the Homebrew rustc that Xcode's
+# PATH otherwise resolves first. Cargo.toml requires rust-version >= 1.94 and
+# Homebrew can lag the rustup stable channel.
+if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 CONFIGURATION="${CONFIGURATION:-Debug}"
 PLATFORM_NAME="${PLATFORM_NAME:-iphonesimulator}"
 CURRENT_ARCH="${CURRENT_ARCH:-${ARCHS:-arm64}}"

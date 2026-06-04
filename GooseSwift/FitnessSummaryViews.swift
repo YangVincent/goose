@@ -50,6 +50,23 @@ struct FitnessSummaryView: View {
           )
         }
 
+        FitnessZoneBreakdownCard(
+          zoneDurations: session.zoneDurations,
+          totalElapsed: session.elapsed
+        )
+
+        if let start = session.startedAt {
+          WorkoutHRTimelineView(
+            startedAt: start,
+            endedAt: session.endedAt ?? Date(),
+            elapsedSeconds: session.elapsed
+          )
+          WorkoutHRHistogramView(
+            startedAt: start,
+            endedAt: session.endedAt ?? Date()
+          )
+        }
+
         if activity.usesGPS {
           FitnessRouteSummaryCard(activity: activity, locationTracker: locationTracker)
             .padding(.top, 4)
@@ -126,6 +143,113 @@ struct FitnessSummaryView: View {
     case .indoor: "house.fill"
     case .pool: "drop.fill"
     }
+  }
+}
+
+/// Post-workout zone breakdown — bar per HR zone with time + share, plus
+/// a colored stacked progress bar. Reads directly off the session's
+/// `zoneDurations` so the in-workout `tick()` accumulation is the source of
+/// truth.
+struct FitnessZoneBreakdownCard: View {
+  let zoneDurations: [Int: TimeInterval]
+  let totalElapsed: TimeInterval
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Time in Zone")
+        .font(.system(size: 22, weight: .bold, design: .rounded))
+        .foregroundStyle(.white)
+
+      stackedBar
+        .frame(height: 10)
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+      VStack(spacing: 6) {
+        ForEach(1...5, id: \.self) { zone in
+          zoneRow(zone)
+        }
+      }
+    }
+    .padding(16)
+    .background(
+      RoundedRectangle(cornerRadius: 18, style: .continuous)
+        .fill(Color.white.opacity(0.05))
+    )
+  }
+
+  private var stackedBar: some View {
+    GeometryReader { geo in
+      HStack(spacing: 1) {
+        ForEach(1...5, id: \.self) { zone in
+          let seconds = zoneDurations[zone, default: 0]
+          let width = totalSeconds > 0 ? CGFloat(seconds / totalSeconds) * geo.size.width : 0
+          Rectangle()
+            .fill(color(zone))
+            .frame(width: max(width, seconds > 0 ? 2 : 0))
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.white.opacity(0.07))
+    }
+  }
+
+  private func zoneRow(_ zone: Int) -> some View {
+    let seconds = zoneDurations[zone, default: 0]
+    let share = totalSeconds > 0 ? seconds / totalSeconds : 0
+    return HStack(spacing: 10) {
+      Circle().fill(color(zone)).frame(width: 9, height: 9)
+      Text("Z\(zone)")
+        .font(.system(size: 13, weight: .heavy, design: .rounded))
+        .foregroundStyle(.white)
+        .frame(width: 26, alignment: .leading)
+      Text(zoneLabel(zone))
+        .font(.system(size: 12, weight: .regular, design: .rounded))
+        .foregroundStyle(.white.opacity(0.55))
+      Spacer()
+      Text(format(seconds))
+        .font(.system(size: 12, weight: .heavy, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(.white.opacity(0.85))
+      Text(String(format: "%2.0f%%", share * 100))
+        .font(.system(size: 11, weight: .heavy, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(.white.opacity(0.45))
+        .frame(width: 36, alignment: .trailing)
+    }
+  }
+
+  private var totalSeconds: Double {
+    let recorded = zoneDurations.values.reduce(0, +)
+    return max(recorded, totalElapsed > 0 ? totalElapsed : recorded)
+  }
+
+  private func color(_ zone: Int) -> Color {
+    switch zone {
+    case 1: FitnessColor.zoneBlue
+    case 2: FitnessColor.zoneTeal
+    case 3: FitnessColor.zoneGreen
+    case 4: FitnessColor.zoneOrange
+    default: FitnessColor.zoneRed
+    }
+  }
+
+  private func zoneLabel(_ zone: Int) -> String {
+    switch zone {
+    case 1: "<60% HRmax"
+    case 2: "60–70%"
+    case 3: "70–80%"
+    case 4: "80–90%"
+    default: "90%+"
+    }
+  }
+
+  private func format(_ seconds: TimeInterval) -> String {
+    let total = Int(seconds.rounded())
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    let s = total % 60
+    if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+    return String(format: "%d:%02d", m, s)
   }
 }
 

@@ -2,6 +2,12 @@ import SwiftUI
 
 struct WhoopHomeView: View {
   @StateObject private var client = WhoopAPIClient.shared
+  @ObservedObject private var dayStrain = DayStrainStore.shared
+  @EnvironmentObject private var model: GooseAppModel
+  /// Set in More → Developer → Debug → "Show strain debug overlay".
+  /// Default off; flip on when the strain card's number looks wrong and
+  /// we need to see what the calculator is doing.
+  @AppStorage("goose.swift.debug.showStrainOverlay") private var showStrainDebugOverlay = false
 
   var body: some View {
     NavigationStack {
@@ -16,7 +22,7 @@ struct WhoopHomeView: View {
     ZStack {
       Self.backgroundGradient.ignoresSafeArea()
 
-      ScrollView {
+      ScrollView(.vertical, showsIndicators: true) {
         VStack(spacing: 20) {
           header
 
@@ -40,6 +46,15 @@ struct WhoopHomeView: View {
           .buttonStyle(.plain)
           .padding(.top, 4)
 
+          WhoopRecoveryBreakdownCard(client: client)
+            .padding(.horizontal, 18)
+
+          WhoopDayComparisonCard(client: client)
+            .padding(.horizontal, 18)
+
+          DayHRTimelineCard(date: client.currentDate)
+            .padding(.horizontal, 18)
+
           statGrid
             .padding(.horizontal, 18)
 
@@ -49,14 +64,42 @@ struct WhoopHomeView: View {
           .buttonStyle(.plain)
           .padding(.horizontal, 18)
 
+          WhoopBedtimeRecommendationCard()
+            .padding(.horizontal, 18)
+
+          WhoopSleepEnvironmentCard()
+            .padding(.horizontal, 18)
+
           NavigationLink(value: WhoopMetric.strain) {
             strainCard
           }
           .buttonStyle(.plain)
           .padding(.horizontal, 18)
+
+          WhoopStrainTargetCard(client: client)
+            .padding(.horizontal, 18)
+
+          WhoopStrainRecoveryTrendCard(client: client)
+            .padding(.horizontal, 18)
+
+          WhoopHRMaxAdvisoryCard()
+            .padding(.horizontal, 18)
+
+          WhoopStepCard(estimator: StepEstimator.shared)
+            .padding(.horizontal, 18)
+
+          JournalEntryCard(date: client.currentDate)
+            .padding(.horizontal, 18)
+
+          WhoopWorkoutHomeCard(client: client)
+            .padding(.horizontal, 18)
         }
         .padding(.bottom, 32)
+        .frame(maxWidth: .infinity)
       }
+      .scrollBounceBehavior(.basedOnSize, axes: [.horizontal])
+      .scrollIndicators(.hidden, axes: .horizontal)
+      .clipped()
       .refreshable {
         await client.loadDay(client.currentDate)
         await client.loadCalendar()
@@ -69,6 +112,9 @@ struct WhoopHomeView: View {
       }
       if client.activities.isEmpty {
         await client.loadActivities()
+      }
+      if client.recoveryHistory.isEmpty {
+        await client.loadRecoveryHistory()
       }
     }
   }
@@ -86,6 +132,7 @@ struct WhoopHomeView: View {
           .foregroundStyle(.white)
       }
       Spacer()
+      WhoopLiveHRPill(ble: model.ble)
       if client.isLoading {
         ProgressView()
           .tint(.white)
@@ -216,35 +263,77 @@ struct WhoopHomeView: View {
   }
 
   private var recoveryRing: some View {
-    let score = client.currentDay?.recovery?.recovery_score
-    let value = score.map { Int($0.rounded()) } ?? 0
+    let resolved = resolvedRecoveryScore
+    let value = resolved.value
     let color = Self.recoveryColor(forPercent: value)
 
     return ZStack {
       Circle()
-        .stroke(Color.white.opacity(0.06), lineWidth: 18)
+        .stroke(Color.white.opacity(0.06), lineWidth: 10)
 
       Circle()
-        .trim(from: 0, to: score == nil ? 0 : Double(value) / 100.0)
-        .stroke(color, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+        .trim(from: 0, to: resolved.source == .none ? 0 : Double(value) / 100.0)
+        .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
         .rotationEffect(.degrees(-90))
-        .shadow(color: color.opacity(0.6), radius: 12, x: 0, y: 0)
+        .shadow(color: color.opacity(0.6), radius: 6, x: 0, y: 0)
 
-      VStack(spacing: 4) {
-        Text(score == nil ? "--" : "\(value)")
-          .font(.system(size: 84, weight: .heavy, design: .rounded))
+      VStack(spacing: 2) {
+        Text(resolved.source == .none ? "--" : "\(value)")
+          .font(.system(size: 42, weight: .heavy, design: .rounded))
           .monospacedDigit()
           .foregroundStyle(.white)
           .minimumScaleFactor(0.5)
 
         Text("RECOVERY")
-          .font(.system(size: 12, weight: .heavy, design: .rounded))
-          .tracking(3)
+          .font(.system(size: 9, weight: .heavy, design: .rounded))
+          .tracking(2)
           .foregroundStyle(color)
+        if resolved.source == .local {
+          Text("LOCAL")
+            .font(.system(size: 7, weight: .heavy, design: .rounded))
+            .tracking(1)
+            .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+        }
       }
-      .padding(28)
+      .padding(14)
     }
-    .frame(width: 260, height: 260)
+    .frame(width: 130, height: 130)
+  }
+
+  private enum RecoverySource {
+    case server
+    case local
+    case none
+  }
+
+  /// Recovery fallback: server first, otherwise our `GooseRecoveryCalculator`
+  /// fed from the same `recoveryHistory` series the Pace of Aging chart
+  /// uses.
+  private var resolvedRecoveryScore: (value: Int, source: RecoverySource) {
+    if let score = client.currentDay?.recovery?.recovery_score, score >= 0 {
+      return (Int(score.rounded()), .server)
+    }
+    if Calendar.current.isDateInToday(client.currentDate) {
+      var hrvSeries = client.recoveryHistory.compactMap(\.hrv_rmssd_milli)
+      hrvSeries.append(contentsOf: NightlyHRVStore.shared.recentNights.map(\.medianRMSSD))
+      var rhrSeries = client.recoveryHistory.compactMap(\.resting_heart_rate)
+      if let local = HeartRateSeriesStore.shared.restingEstimate() {
+        rhrSeries.append(local.bpm)
+      }
+      let sleepPerformance = client.currentDay?.sleep?.performance
+        ?? SleepWindowStore.shared.lastNight.map { $0.performance * 100 }
+      if hrvSeries.count >= 4 || rhrSeries.count >= 4 {
+        let score = GooseRecoveryCalculator.compute(
+          hrvSeries: hrvSeries,
+          rhrSeries: rhrSeries,
+          sleepPerformance: sleepPerformance
+        )
+        if score.confidence > 0 {
+          return (score.score, .local)
+        }
+      }
+    }
+    return (0, .none)
   }
 
   private var statGrid: some View {
@@ -315,20 +404,129 @@ struct WhoopHomeView: View {
           }
         }
       }
+    } else if let window = SleepWindowStore.shared.lastNight {
+      // Server has no sleep stages — fall back to our locally-detected
+      // sleep window from `SleepWindowDetector`. Doesn't have stages but
+      // duration + performance is enough to keep the sleep card useful.
+      cardSurface {
+        VStack(alignment: .leading, spacing: 14) {
+          HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: 6) {
+              Text("SLEEP")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(2.5)
+                .foregroundStyle(.white.opacity(0.6))
+              Text("LOCAL")
+                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                .tracking(1)
+                .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                  RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.18))
+                )
+            }
+            Spacer()
+            Text(localSleepDurationLabel(window.durationSeconds))
+              .font(.system(size: 20, weight: .heavy, design: .rounded))
+              .monospacedDigit()
+              .foregroundStyle(.white)
+          }
+          HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("ASLEEP").font(.system(size: 8, weight: .heavy, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.45))
+              Text(localClockLabel(window.onset))
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+              Text("WAKE").font(.system(size: 8, weight: .heavy, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.45))
+              Text(localClockLabel(window.wake))
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+              Text("PERFORMANCE").font(.system(size: 8, weight: .heavy, design: .rounded)).tracking(1).foregroundStyle(.white.opacity(0.45))
+              Text(String(format: "%.0f%%", window.performance * 100))
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+            }
+            Spacer()
+          }
+        }
+      }
     }
+  }
+
+  private func localClockLabel(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "h:mm a"
+    return f.string(from: date)
+  }
+
+  private func localSleepDurationLabel(_ seconds: Double) -> String {
+    let total = Int(seconds.rounded())
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    return "\(h)h \(String(format: "%02d", m))m"
   }
 
   @ViewBuilder
   private var strainCard: some View {
-    if let strain = client.currentDay?.strain?.strain {
+    let resolved = resolvedStrain
+    if showStrainDebugOverlay, let debug = dayStrain.debug {
+      // Temporary diagnostic block so we can see what the strain calculator
+      // is actually doing. Will go away once today's data is sorted out.
+      VStack(alignment: .leading, spacing: 2) {
+        Text("STRAIN DEBUG (TODAY)")
+          .font(.system(size: 8, weight: .heavy, design: .rounded))
+          .tracking(1.2)
+          .foregroundStyle(.white.opacity(0.6))
+        Text("workouts=\(debug.workoutsFound)  hr_samples=\(debug.totalHRSamples)  non_workout=\(debug.nonWorkoutSamples)")
+          .font(.system(size: 9, weight: .semibold, design: .rounded).monospacedDigit())
+          .foregroundStyle(.white.opacity(0.55))
+        Text(String(format: "bg_trimp=%.1f  edw_raw=%.1f  edw_scaled=%.1f  total=%.1f  strain=%.2f",
+                    debug.backgroundTRIMP, debug.workoutEdwardsRaw,
+                    debug.workoutEdwardsScaled, debug.totalTRIMP, debug.finalStrain))
+          .font(.system(size: 9, weight: .semibold, design: .rounded).monospacedDigit())
+          .foregroundStyle(.white.opacity(0.55))
+        Text("formulas: per-activity (running fit α=2.5; walking α=7.5; ...)")
+          .font(.system(size: 9, weight: .semibold, design: .rounded).monospacedDigit())
+          .foregroundStyle(Color(red: 0.55, green: 0.85, blue: 1.0).opacity(0.85))
+      }
+      .padding(8)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(Color(red: 0.18, green: 0.65, blue: 0.45).opacity(0.12))
+      )
+    }
+    if resolved.value > 0 || resolved.source != .none {
       cardSurface {
         HStack(alignment: .center, spacing: 14) {
           VStack(alignment: .leading, spacing: 4) {
-            Text("STRAIN")
-              .font(.system(size: 11, weight: .heavy, design: .rounded))
-              .tracking(2.5)
-              .foregroundStyle(.white.opacity(0.6))
-            Text(String(format: "%.1f", strain))
+            HStack(spacing: 6) {
+              Text("STRAIN")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(2.5)
+                .foregroundStyle(.white.opacity(0.6))
+              if resolved.source == .local {
+                Text("LOCAL")
+                  .font(.system(size: 8, weight: .heavy, design: .rounded))
+                  .tracking(1)
+                  .foregroundStyle(Color(red: 0.18, green: 0.88, blue: 0.66))
+                  .padding(.horizontal, 4)
+                  .padding(.vertical, 2)
+                  .background(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                      .fill(Color(red: 0.18, green: 0.88, blue: 0.66).opacity(0.18))
+                  )
+              }
+            }
+            Text(String(format: "%.1f", resolved.value))
               .font(.system(size: 36, weight: .heavy, design: .rounded))
               .monospacedDigit()
               .foregroundStyle(.white)
@@ -341,13 +539,41 @@ struct WhoopHomeView: View {
             Circle()
               .stroke(Color.white.opacity(0.08), lineWidth: 8)
             Circle()
-              .trim(from: 0, to: min(strain / 21.0, 1))
+              .trim(from: 0, to: min(resolved.value / 21.0, 1))
               .stroke(Self.strainColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
               .rotationEffect(.degrees(-90))
           }
           .frame(width: 72, height: 72)
         }
       }
+    }
+  }
+
+  private enum StrainSource {
+    case server
+    case local
+    case none
+  }
+
+  private var resolvedStrain: (value: Double, source: StrainSource) {
+    let serverStrain = client.currentDay?.strain?.strain.map { ($0, StrainSource.server) }
+    let localStrain: (Double, StrainSource)? = {
+      guard Calendar.current.isDateInToday(client.currentDate),
+            let local = dayStrain.today else { return nil }
+      return (local.strain, .local)
+    }()
+    // Take the max. Server's strain is sometimes stale (post-May-5 OAuth
+    // expiry left placeholder values like 0.5 on the dashboard side); if
+    // local computed something higher, that reflects today's actual load.
+    switch (serverStrain, localStrain) {
+    case (.some(let s), .some(let l)):
+      return l.0 > s.0 ? l : s
+    case (.some(let s), .none):
+      return s.0 > 0 ? s : (0, .none)
+    case (.none, .some(let l)):
+      return l
+    case (.none, .none):
+      return (0, .none)
     }
   }
 

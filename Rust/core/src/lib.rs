@@ -36,6 +36,7 @@ pub mod step_discovery;
 pub mod step_motion_estimator;
 pub mod storage_check;
 pub mod store;
+pub mod swift_caches;
 pub mod timeline;
 pub mod tool_args;
 pub mod ui_coverage;

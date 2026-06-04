@@ -526,7 +526,9 @@ extension GooseAppModel {
         movementSample: nil,
         whoopEvent: nil,
         dataSignal: nil,
-        sensorSample: nil
+        sensorSample: nil,
+        r17Packet: nil,
+        imuPacket: nil
       )
     }
 
@@ -551,7 +553,9 @@ extension GooseAppModel {
         ?? parsed.flatMap { extractWhoopEvent(from: $0, capturedAt: event.capturedAt) },
       dataSignal: extractWhoopDataSignal(from: compact, capturedAt: event.capturedAt)
         ?? parsed.flatMap { extractWhoopDataSignal(from: $0, capturedAt: event.capturedAt) },
-      sensorSample: parsed.flatMap { extractSensorSample(from: $0, capturedAt: event.capturedAt) }
+      sensorSample: parsed.flatMap { extractSensorSample(from: $0, capturedAt: event.capturedAt) },
+      r17Packet: parsed.flatMap { extractR17Packet(from: $0, capturedAt: event.capturedAt) },
+      imuPacket: parsed.flatMap { extractIMUPacket(from: $0, capturedAt: event.capturedAt) }
     )
   }
 
@@ -662,6 +666,14 @@ extension GooseAppModel {
     // channels WHOOP normally ships server-side for off-device DSP.
     if let sensor = interpretation.sensorSample {
       SensorSampleStore.shared.append(sensor)
+    }
+    // Also persist R17 optical streams and K10/K21 IMU packets so the
+    // user owns the raw signal for both axes WHOOP processes server-side.
+    if let r17 = interpretation.r17Packet {
+      R17PacketStore.shared.append(r17)
+    }
+    if let imu = interpretation.imuPacket {
+      IMUPacketStore.shared.append(imu)
     }
     if let sample = interpretation.movementSample {
       handleMovementPacket(sample)

@@ -46,7 +46,7 @@ final class GooseUploader: ObservableObject {
 
   // MARK: - Public API
 
-  init(maxHR: Int = 187) {
+  init(maxHR: Int = UserProfile.maxHeartRate) {
     self.maxHR = maxHR
   }
 
@@ -65,11 +65,15 @@ final class GooseUploader: ObservableObject {
     isUploading = true
     defer { isUploading = false }
 
-    let samples = readSamples()
-    if samples.isEmpty {
+    let allSamples = readSamples()
+    if allSamples.isEmpty {
       lastError = "no samples available"
       return
     }
+    // Drop samples that landed during off-wrist windows so daily aggregates
+    // don't include PPG noise from the strap sitting on a desk.
+    let offWrist = SensorSampleStore.shared.offWristWindows()
+    let samples = filterOnWrist(allSamples, offWristWindows: offWrist)
 
     let aggregates = aggregateByDay(samples: samples)
     let payload: [String: Any] = [
@@ -118,6 +122,32 @@ final class GooseUploader: ObservableObject {
   private struct SamplesFile: Decodable {
     let version: Int?
     let samples: [Sample]
+  }
+
+  private func filterOnWrist(_ samples: [Sample], offWristWindows: [(start: Date, end: Date)]) -> [Sample] {
+    guard !offWristWindows.isEmpty else { return samples }
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let plainParser = ISO8601DateFormatter()
+    return samples.filter { sample in
+      let date = parser.date(from: sample.capturedAt) ?? plainParser.date(from: sample.capturedAt)
+      guard let date else { return true }
+      // Binary-search the sorted, non-overlapping windows.
+      var lo = 0
+      var hi = offWristWindows.count - 1
+      while lo <= hi {
+        let mid = (lo + hi) / 2
+        let window = offWristWindows[mid]
+        if date < window.start {
+          hi = mid - 1
+        } else if date > window.end {
+          lo = mid + 1
+        } else {
+          return false
+        }
+      }
+      return true
+    }
   }
 
   private func readSamples() -> [Sample] {

@@ -27,6 +27,14 @@ struct AppShellView: View {
       // Idempotent on the server (upsert by date), runs only if last upload
       // is older than the uploader's minimum interval.
       await GooseUploader.shared.uploadNowIfStale()
+      // Refresh the workout cache from Rust SQLite on every foreground.
+      await CompletedWorkoutStore.shared.refresh()
+      // Recompute today's strain from local 1Hz HR samples so the strain
+      // card has a value even when the server hasn't delivered one yet.
+      DayStrainStore.shared.refresh()
+      // Re-run the personal HRmax peak detector. Surfaces the advisory card
+      // only when observed peaks exceed the configured value.
+      PersonalHRPeakStore.shared.refresh()
     }
   }
 

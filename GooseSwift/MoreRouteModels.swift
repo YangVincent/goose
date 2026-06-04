@@ -4,6 +4,11 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
   case profile
   case device
   case smartAlarm
+  case sensorInspector
+  case stressMonitor
+  case appleHealthExport
+  case strapBattery
+  case dataRecovery
   case connectionLab
   case capture
   case localStore
@@ -23,6 +28,11 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .profile: "Profile"
     case .device: "Device"
     case .smartAlarm: "Smart Alarm"
+    case .sensorInspector: "Sensor Inspector"
+    case .stressMonitor: "Stress · HRV"
+    case .appleHealthExport: "Apple Health Export"
+    case .strapBattery: "Strap Battery"
+    case .dataRecovery: "Data Recovery"
     case .connectionLab: "Connection Lab"
     case .capture: "Capture"
     case .localStore: "Local Store"
@@ -42,6 +52,11 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .profile: "Name, birthday, height, weight, and profile basics"
     case .device: "WHOOP band, connection, battery, and pairing"
     case .smartAlarm: "Vibrate the strap at a target wake time"
+    case .sensorInspector: "Live PPG, SpO₂, skin temp, ambient light, contact"
+    case .stressMonitor: "Rolling HRV (RMSSD) and stress z-score off the strap"
+    case .appleHealthExport: "Push locally-recorded workouts to Apple Health"
+    case .strapBattery: "Charge level, charging state, last seen"
+    case .dataRecovery: "Back-fill hr_samples from decoded frames"
     case .connectionLab: "Low-level Bluetooth, hello, and event diagnostics"
     case .capture: "Notification capture, imports, and command evidence"
     case .localStore: "SQLite path, schema, and storage health"
@@ -61,6 +76,11 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .profile: "person.crop.circle"
     case .device: "sensor.tag.radiowaves.forward"
     case .smartAlarm: "alarm"
+    case .sensorInspector: "waveform.path.ecg"
+    case .stressMonitor: "heart.text.square.fill"
+    case .appleHealthExport: "square.and.arrow.up.on.square"
+    case .strapBattery: "battery.75percent"
+    case .dataRecovery: "arrow.counterclockwise.heart"
     case .connectionLab: "antenna.radiowaves.left.and.right"
     case .capture: "record.circle"
     case .localStore: "externaldrive"
@@ -81,6 +101,12 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .device: \.device
     // Smart Alarm depends on device readiness, so re-uses the device status.
     case .smartAlarm: \.device
+    // Sensor Inspector also depends on a live strap connection.
+    case .sensorInspector: \.device
+    case .stressMonitor: \.device
+    case .appleHealthExport: \.healthSync
+    case .strapBattery: \.device
+    case .dataRecovery: \.device
     case .connectionLab: \.connectionLab
     case .capture: \.capture
     case .localStore: \.localStore
@@ -95,7 +121,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     }
   }
 
-  static let deviceRoutes: [MoreRoute] = [.device, .smartAlarm]
+  static let deviceRoutes: [MoreRoute] = [.device, .smartAlarm, .strapBattery, .sensorInspector, .stressMonitor, .appleHealthExport]
   static let appRoutes: [MoreRoute] = [.healthSync]
   static let settingsRoutes: [MoreRoute] = [.privacy]
   static let supportRoutes: [MoreRoute] = [.support, .about]

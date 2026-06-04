@@ -136,6 +136,7 @@ name = "goose-perf-budget"
 path = "src/bin/goose-perf-budget.rs"
 
 [dependencies]
+base64 = "0.22"
 crc32fast = "1.4"
 hex = "0.4"
 rusqlite = { version = "0.37", features = ["bundled"] }

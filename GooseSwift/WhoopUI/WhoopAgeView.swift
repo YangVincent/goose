@@ -31,6 +31,10 @@ struct WhoopAgeView: View {
           header
           heroAge
           deltaBadge
+          WhoopPaceOfAgingChart(
+            client: client,
+            chronologicalAge: chronologicalAge
+          )
           factorBreakdown
           strapZoneCard
           methodologyNote
@@ -40,11 +44,15 @@ struct WhoopAgeView: View {
       }
       .refreshable {
         await client.loadHealthspan()
+        await client.loadRecoveryHistory()
       }
     }
     .task {
       if client.healthspan == nil {
         await client.loadHealthspan()
+      }
+      if client.recoveryHistory.isEmpty {
+        await client.loadRecoveryHistory()
       }
     }
   }
@@ -188,7 +196,7 @@ struct WhoopAgeView: View {
           ForEach(1...5, id: \.self) { zone in
             zoneRow(zone: zone, minutes: buckets[zone] ?? 0, totalMinutes: totalMinutes)
           }
-          Text("Counts only seconds while phone was paired with strap. Bin boundaries use HRmax 187.")
+          Text("Counts only seconds while phone was paired with strap. Bin boundaries use HRmax \(UserProfile.maxHeartRate).")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.white.opacity(0.35))
             .lineSpacing(2)
@@ -234,7 +242,7 @@ struct WhoopAgeView: View {
   /// to the next sample to its own zone (capped at 60 seconds so a long
   /// disconnect doesn't blow up totals).
   private func strapZoneBucketsForToday() -> [Int: Double] {
-    let maxHR = Double(client.healthspan?.max_hr ?? 187)
+    let maxHR = Double(client.healthspan?.max_hr ?? UserProfile.maxHeartRate)
     let samples = HeartRateSeriesStore.shared.samples(forDayContaining: Date())
     guard samples.count > 1 else { return [:] }
     var buckets: [Int: Double] = [:]

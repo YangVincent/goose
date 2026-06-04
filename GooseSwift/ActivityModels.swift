@@ -158,7 +158,11 @@ struct HeartRateZone: Identifiable {
   let range: String
   let color: Color
 
-  static let maxHeartRate = 190
+  /// Single source of truth for HRmax — reverse-engineered to match WHOOP's
+  /// reported zone math (54 → 0% on the strain dial, 187 = 100% / Zone 5).
+  /// Both the live workout view's zone ribbon and the server upload's
+  /// daily-aggregate zone bins read from this constant.
+  static let maxHeartRate = UserProfile.maxHeartRate
 
   static let zones = [
     HeartRateZone(id: 1, title: "Zone 1", range: "<60%", color: .blue),

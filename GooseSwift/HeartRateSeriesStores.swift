@@ -52,6 +52,8 @@ struct HeartRateRestingEstimate: Equatable {
   let source: String
 }
 
+/// Legacy on-disk shape — kept only because some debug exports reference it.
+/// New code goes through the SQLite-backed HeartRateSeriesStore directly.
 struct HeartRateSeriesFile: Codable {
   let version: Int
   let samples: [HeartRateSamplePoint]
@@ -63,20 +65,25 @@ final class HeartRateSeriesStore {
 
   private static let retention: TimeInterval = 7 * 24 * 60 * 60
   private static let maxSamples = 100_000
-  private static let persistDelay: TimeInterval = 1.0
   private static let updateNotificationInterval: TimeInterval = 2.0
 
-  private let url: URL
   private let stateLock = NSLock()
   private let writeQueue = DispatchQueue(label: "com.goose.swift.heart-rate-series", qos: .utility)
+  private let bridge = GooseRustBridge()
   private var samples: [HeartRateSamplePoint]
-  private var pendingWrite: DispatchWorkItem?
   private var lastNotificationAt = Date.distantPast
 
-  init(url: URL = HeartRateSeriesStore.defaultURL()) {
-    self.url = url
-    self.samples = Self.loadSamples(from: url)
+  init() {
+    self.samples = Self.loadFromStore(bridge: GooseRustBridge())
     prune(relativeTo: Date())
+    // DO NOT delete legacy JSON. Earlier code did, and it dropped HR data
+    // that hadn't been imported into SQLite yet. The legacy importer below
+    // pulls any remaining samples into SQLite without touching the file.
+    Self.importLegacyJSONIntoStoreIfPresent()
+    // No init-time decoded_frames recovery — that's a one-shot operation
+    // exposed via a "Recover HR from decoded frames" button in More → Debug.
+    // Going forward, `Store::insert_decoded_frame` mirrors HR into hr_samples
+    // automatically (same transaction), so live capture stays in sync.
   }
 
   func append(bpm: Int, source: String, capturedAt: Date) -> Bool {
@@ -92,9 +99,10 @@ final class HeartRateSeriesStore {
       return false
     }
 
-    samples.append(HeartRateSamplePoint(bpm: bpm, source: source, capturedAt: capturedAt))
+    let point = HeartRateSamplePoint(bpm: bpm, source: source, capturedAt: capturedAt)
+    samples.append(point)
     prune(relativeTo: capturedAt)
-    schedulePersist()
+    persistToStore(point)
     let shouldPostUpdate = markUpdateNotificationIfNeeded()
     stateLock.unlock()
     if shouldPostUpdate {
@@ -230,26 +238,136 @@ final class HeartRateSeriesStore {
     return samples.last
   }
 
-  private static func defaultURL() -> URL {
-    let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? FileManager.default.temporaryDirectory
-    let directory = baseDirectory.appendingPathComponent("GooseSwift", isDirectory: true)
-    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    return directory
-      .appendingPathComponent("heart-rate-samples.json")
-  }
+  // MARK: - SQLite persistence
 
-  private static func loadSamples(from url: URL) -> [HeartRateSamplePoint] {
-    guard let data = try? Data(contentsOf: url) else {
+  /// Load the retention window from SQLite into the in-memory cache.
+  /// Called once at init; reads after that serve from `self.samples`.
+  private static func loadFromStore(bridge: GooseRustBridge) -> [HeartRateSamplePoint] {
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let end = Date()
+    let start = end.addingTimeInterval(-Self.retention)
+    let response: [String: Any]
+    do {
+      response = try bridge.request(
+        method: "swift_caches.list_hr_samples",
+        args: [
+          "database_path": dbPath,
+          "start_time_unix_ms": Int64((start.timeIntervalSince1970 * 1000).rounded()),
+          "end_time_unix_ms": Int64((end.timeIntervalSince1970 * 1000).rounded()),
+        ]
+      )
+    } catch {
       return []
     }
+    let rows = response["samples"] as? [[String: Any]] ?? []
+    return rows.compactMap { row -> HeartRateSamplePoint? in
+      guard let bpm = row["bpm"] as? Int,
+            let capturedAtMs = (row["captured_at_ms"] as? Int64)
+              ?? (row["captured_at_ms"] as? Int).map(Int64.init) else { return nil }
+      let source = (row["source"] as? String) ?? ""
+      let date = Date(timeIntervalSince1970: TimeInterval(capturedAtMs) / 1000.0)
+      return HeartRateSamplePoint(bpm: bpm, source: source, capturedAt: date)
+    }
+    .sorted { $0.capturedAt < $1.capturedAt }
+  }
+
+  private func persistToStore(_ sample: HeartRateSamplePoint) {
+    let bridge = self.bridge
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let id = sample.id
+    let bpm = sample.bpm
+    let source = sample.source
+    let capturedAtMs = Int64((sample.capturedAt.timeIntervalSince1970 * 1000).rounded())
+    writeQueue.async {
+      let _ = try? bridge.request(
+        method: "swift_caches.append_hr_sample",
+        args: [
+          "database_path": dbPath,
+          "sample_id": id,
+          "captured_at_ms": capturedAtMs,
+          "bpm": bpm,
+          "source": source,
+        ]
+      )
+    }
+  }
+
+  /// One-shot recovery: ask Rust to walk decoded_frames for the given time
+  /// window and import any HR values it finds into `hr_samples`. Exposed
+  /// publicly so the More → Debug "Recover HR from decoded frames" button
+  /// can call it and display the report.
+  ///
+  /// Going forward this should rarely be needed — `Store::insert_decoded_frame`
+  /// now mirrors HR into hr_samples in the same transaction. The recovery
+  /// exists for back-filling historical data captured before that side-effect
+  /// landed.
+  struct HRRecoveryReport {
+    let framesScanned: Int
+    let hrSamplesExtracted: Int
+    let hrSamplesInserted: Int
+  }
+
+  static func recoverHRFromDecodedFrames(daysBack: Int = 30) -> HRRecoveryReport {
+    let bridge = GooseRustBridge()
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let end = Date()
+    let start = end.addingTimeInterval(-Double(daysBack) * 86400)
+    do {
+      let response = try bridge.request(
+        method: "swift_caches.recover_hr_from_decoded_frames",
+        args: [
+          "database_path": dbPath,
+          "start_time_unix_ms": Int64((start.timeIntervalSince1970 * 1000).rounded()),
+          "end_time_unix_ms": Int64((end.timeIntervalSince1970 * 1000).rounded()),
+        ]
+      )
+      let report = response["report"] as? [String: Any] ?? [:]
+      return HRRecoveryReport(
+        framesScanned: (report["frames_scanned"] as? Int) ?? 0,
+        hrSamplesExtracted: (report["hr_samples_extracted"] as? Int) ?? 0,
+        hrSamplesInserted: (report["hr_samples_inserted"] as? Int) ?? 0
+      )
+    } catch {
+      return HRRecoveryReport(framesScanned: 0, hrSamplesExtracted: 0, hrSamplesInserted: 0)
+    }
+  }
+
+  /// Import any HR samples still living in the legacy `heart-rate-samples.json`
+  /// file into SQLite, *without* deleting the file. Idempotent — the SQLite
+  /// `INSERT OR IGNORE` keeps duplicates from accumulating, and the file is
+  /// kept on disk as a recoverable copy.
+  private static func importLegacyJSONIntoStoreIfPresent() {
+    let base = FileManager.default
+      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first ?? FileManager.default.temporaryDirectory
+    let url = base
+      .appendingPathComponent("GooseSwift", isDirectory: true)
+      .appendingPathComponent("heart-rate-samples.json")
+    guard FileManager.default.fileExists(atPath: url.path),
+          let data = try? Data(contentsOf: url) else { return }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
-    if let file = try? decoder.decode(HeartRateSeriesFile.self, from: data) {
-      return file.samples.sorted { $0.capturedAt < $1.capturedAt }
+    let legacySamples: [HeartRateSamplePoint] = {
+      if let file = try? decoder.decode(HeartRateSeriesFile.self, from: data) {
+        return file.samples
+      }
+      return (try? decoder.decode([HeartRateSamplePoint].self, from: data)) ?? []
+    }()
+    guard !legacySamples.isEmpty else { return }
+    let bridge = GooseRustBridge()
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    for sample in legacySamples {
+      _ = try? bridge.request(
+        method: "swift_caches.append_hr_sample",
+        args: [
+          "database_path": dbPath,
+          "sample_id": sample.id,
+          "captured_at_ms": Int64((sample.capturedAt.timeIntervalSince1970 * 1000).rounded()),
+          "bpm": sample.bpm,
+          "source": sample.source,
+        ]
+      )
     }
-    return (try? decoder.decode([HeartRateSamplePoint].self, from: data))?
-      .sorted { $0.capturedAt < $1.capturedAt } ?? []
   }
 
   private func prune(relativeTo date: Date) {
@@ -261,39 +379,6 @@ final class HeartRateSeriesStore {
     }
     if samples.count > Self.maxSamples {
       samples.removeFirst(samples.count - Self.maxSamples)
-    }
-  }
-
-  private func schedulePersist() {
-    guard pendingWrite == nil else {
-      return
-    }
-
-    let workItem = DispatchWorkItem { [weak self] in
-      guard let self else {
-        return
-      }
-      self.stateLock.lock()
-      self.pendingWrite = nil
-      let url = self.url
-      let payload = HeartRateSeriesFile(version: 1, samples: self.samples)
-      self.stateLock.unlock()
-      Self.persist(payload: payload, to: url)
-    }
-    pendingWrite = workItem
-    writeQueue.asyncAfter(deadline: .now() + Self.persistDelay, execute: workItem)
-  }
-
-  private static func persist(payload: HeartRateSeriesFile, to url: URL) {
-    do {
-      let directory = url.deletingLastPathComponent()
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-      let data = try encoder.encode(payload)
-      try data.write(to: url, options: .atomic)
-    } catch {
-      NSLog("GooseSwift heart-rate sample persist failed: \(String(describing: error))")
     }
   }
 
@@ -346,21 +431,20 @@ final class HRVSeriesStore {
   private static let persistDelay: TimeInterval = 1.0
   private static let updateNotificationInterval: TimeInterval = 2.0
 
-  private let url: URL
   private let stateLock = NSLock()
   private let writeQueue = DispatchQueue(label: "com.goose.swift.hrv-series", qos: .utility)
+  private let bridge = GooseRustBridge()
   private var samples: [HRVSamplePoint]
-  private var pendingWrite: DispatchWorkItem?
   private var lastNotificationAt = Date.distantPast
 
-  init(url: URL = HRVSeriesStore.defaultURL()) {
-    self.url = url
-    self.samples = Self.loadSamples(from: url)
+  init() {
+    self.samples = Self.loadFromStore(bridge: GooseRustBridge())
     if samples.isEmpty, let migratedSample = Self.loadPersistedLiveSample() {
       samples = [migratedSample]
-      schedulePersist()
+      persistToStore(migratedSample)
     }
     prune(relativeTo: Date())
+    Self.importLegacyJSONIntoStoreIfPresent()
   }
 
   func append(rmssdMS: Double, rrIntervalCount: Int, source: String, capturedAt: Date) -> Bool {
@@ -377,9 +461,10 @@ final class HRVSeriesStore {
       return false
     }
 
-    samples.append(HRVSamplePoint(rmssdMS: rmssdMS, rrIntervalCount: rrIntervalCount, source: source, capturedAt: capturedAt))
+    let point = HRVSamplePoint(rmssdMS: rmssdMS, rrIntervalCount: rrIntervalCount, source: source, capturedAt: capturedAt)
+    samples.append(point)
     prune(relativeTo: capturedAt)
-    schedulePersist()
+    persistToStore(point)
     let shouldPostUpdate = markUpdateNotificationIfNeeded()
     stateLock.unlock()
     if shouldPostUpdate {
@@ -433,26 +518,101 @@ final class HRVSeriesStore {
     )
   }
 
-  private static func defaultURL() -> URL {
-    let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? FileManager.default.temporaryDirectory
-    let directory = baseDirectory.appendingPathComponent("GooseSwift", isDirectory: true)
-    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    return directory
-      .appendingPathComponent("hrv-samples.json")
-  }
+  // MARK: - SQLite persistence
 
-  private static func loadSamples(from url: URL) -> [HRVSamplePoint] {
-    guard let data = try? Data(contentsOf: url) else {
+  private static func loadFromStore(bridge: GooseRustBridge) -> [HRVSamplePoint] {
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let end = Date()
+    let start = end.addingTimeInterval(-Self.retention)
+    let response: [String: Any]
+    do {
+      response = try bridge.request(
+        method: "swift_caches.list_hrv_samples",
+        args: [
+          "database_path": dbPath,
+          "start_time_unix_ms": Int64((start.timeIntervalSince1970 * 1000).rounded()),
+          "end_time_unix_ms": Int64((end.timeIntervalSince1970 * 1000).rounded()),
+        ]
+      )
+    } catch {
       return []
     }
+    let rows = response["samples"] as? [[String: Any]] ?? []
+    return rows.compactMap { row -> HRVSamplePoint? in
+      guard let rmssd = row["rmssd_ms"] as? Double,
+            let capturedAtMs = (row["captured_at_ms"] as? Int64)
+              ?? (row["captured_at_ms"] as? Int).map(Int64.init) else { return nil }
+      let rrCount = (row["rr_interval_count"] as? Int) ?? 0
+      let source = (row["source"] as? String) ?? ""
+      return HRVSamplePoint(
+        rmssdMS: rmssd,
+        rrIntervalCount: rrCount,
+        source: source,
+        capturedAt: Date(timeIntervalSince1970: TimeInterval(capturedAtMs) / 1000.0)
+      )
+    }
+    .sorted { $0.capturedAt < $1.capturedAt }
+  }
+
+  private func persistToStore(_ sample: HRVSamplePoint) {
+    let bridge = self.bridge
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let id = sample.id
+    let rmssd = sample.rmssdMS
+    let rrCount = sample.rrIntervalCount
+    let source = sample.source
+    let capturedAtMs = Int64((sample.capturedAt.timeIntervalSince1970 * 1000).rounded())
+    writeQueue.async {
+      _ = try? bridge.request(
+        method: "swift_caches.append_hrv_sample",
+        args: [
+          "database_path": dbPath,
+          "sample_id": id,
+          "captured_at_ms": capturedAtMs,
+          "rmssd_ms": rmssd,
+          "rr_interval_count": rrCount,
+          "source": source,
+        ]
+      )
+    }
+  }
+
+  /// Import any HRV samples in the legacy `hrv-samples.json` into SQLite,
+  /// WITHOUT deleting the file. Safe to run on every launch — duplicates
+  /// are blocked by `INSERT OR IGNORE` on the SQLite side.
+  private static func importLegacyJSONIntoStoreIfPresent() {
+    let base = FileManager.default
+      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first ?? FileManager.default.temporaryDirectory
+    let url = base
+      .appendingPathComponent("GooseSwift", isDirectory: true)
+      .appendingPathComponent("hrv-samples.json")
+    guard FileManager.default.fileExists(atPath: url.path),
+          let data = try? Data(contentsOf: url) else { return }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
-    if let file = try? decoder.decode(HRVSeriesFile.self, from: data) {
-      return file.samples.sorted { $0.capturedAt < $1.capturedAt }
+    let legacy: [HRVSamplePoint] = {
+      if let file = try? decoder.decode(HRVSeriesFile.self, from: data) {
+        return file.samples
+      }
+      return (try? decoder.decode([HRVSamplePoint].self, from: data)) ?? []
+    }()
+    guard !legacy.isEmpty else { return }
+    let bridge = GooseRustBridge()
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    for sample in legacy {
+      _ = try? bridge.request(
+        method: "swift_caches.append_hrv_sample",
+        args: [
+          "database_path": dbPath,
+          "sample_id": sample.id,
+          "captured_at_ms": Int64((sample.capturedAt.timeIntervalSince1970 * 1000).rounded()),
+          "rmssd_ms": sample.rmssdMS,
+          "rr_interval_count": sample.rrIntervalCount,
+          "source": sample.source,
+        ]
+      )
     }
-    return (try? decoder.decode([HRVSamplePoint].self, from: data))?
-      .sorted { $0.capturedAt < $1.capturedAt } ?? []
   }
 
   private static func loadPersistedLiveSample() -> HRVSamplePoint? {
@@ -484,39 +644,6 @@ final class HRVSeriesStore {
     }
     if samples.count > Self.maxSamples {
       samples.removeFirst(samples.count - Self.maxSamples)
-    }
-  }
-
-  private func schedulePersist() {
-    guard pendingWrite == nil else {
-      return
-    }
-
-    let workItem = DispatchWorkItem { [weak self] in
-      guard let self else {
-        return
-      }
-      self.stateLock.lock()
-      self.pendingWrite = nil
-      let url = self.url
-      let payload = HRVSeriesFile(version: 1, samples: self.samples)
-      self.stateLock.unlock()
-      Self.persist(payload: payload, to: url)
-    }
-    pendingWrite = workItem
-    writeQueue.asyncAfter(deadline: .now() + Self.persistDelay, execute: workItem)
-  }
-
-  private static func persist(payload: HRVSeriesFile, to url: URL) {
-    do {
-      let directory = url.deletingLastPathComponent()
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-      let data = try encoder.encode(payload)
-      try data.write(to: url, options: .atomic)
-    } catch {
-      NSLog("GooseSwift HRV sample persist failed: \(String(describing: error))")
     }
   }
 

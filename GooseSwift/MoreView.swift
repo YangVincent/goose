@@ -102,6 +102,16 @@ struct MoreView: View {
       DeviceView()
     case .smartAlarm:
       SmartAlarmView()
+    case .sensorInspector:
+      SensorInspectorView()
+    case .stressMonitor:
+      StressMonitorView()
+    case .appleHealthExport:
+      AppleHealthExportView()
+    case .strapBattery:
+      StrapBatteryPanelView(ble: model.ble)
+    case .dataRecovery:
+      DataRecoveryView()
     case .profile:
       MoreProfileView()
     case .connectionLab:

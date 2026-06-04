@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import UIKit
 
@@ -162,6 +163,23 @@ extension GooseAppModel {
     ble.exitHighFrequencyHistorySync()
   }
 
+  /// Uniformly sample a long location track down to roughly `maxPoints`.
+  /// Used so workout provenance JSON stays bounded even for multi-hour
+  /// runs — points are evenly spaced through the array, preserving overall
+  /// route shape.
+  private static func downsampleRoute(_ locations: [CLLocation], maxPoints: Int) -> [CLLocation] {
+    guard locations.count > maxPoints else { return locations }
+    let stride = Double(locations.count) / Double(maxPoints)
+    var picked: [CLLocation] = []
+    var idx = 0.0
+    while Int(idx) < locations.count {
+      picked.append(locations[Int(idx)])
+      idx += stride
+    }
+    if picked.last !== locations.last { picked.append(locations.last!) }
+    return picked
+  }
+
   func finishActivityRecording(
     activity: ActivityKind,
     startedAt: Date?,
@@ -258,6 +276,21 @@ extension GooseAppModel {
       provenance["mean_motion_intensity_0_to_1"] = sensorMetrics.meanMotionIntensity
       provenance["peak_motion_intensity_0_to_1"] = sensorMetrics.peakMotionIntensity
     }
+    // Persist a downsampled route into provenance so the workout detail
+    // view can render the map without needing a separate table. We cap at
+    // ~360 points so even an hour-long run fits in a few KB of JSON.
+    let routeLocations = activityLocationTracker.locations
+    if !routeLocations.isEmpty {
+      let downsampled = Self.downsampleRoute(routeLocations, maxPoints: 360)
+      provenance["route_points"] = downsampled.map { loc in
+        [
+          "lat": loc.coordinate.latitude,
+          "lon": loc.coordinate.longitude,
+          "alt": loc.altitude,
+          "t_ms": Int64(loc.timestamp.timeIntervalSince1970 * 1000),
+        ] as [String: Any]
+      }
+    }
     if let lastImportedFrameAt = persistence?.lastImportedFrameAt {
       provenance["last_imported_frame_at"] = Self.captureTimestampFormatter.string(from: lastImportedFrameAt)
     }
@@ -312,6 +345,11 @@ extension GooseAppModel {
       activityPersistenceStatus = "\(storedPrefix) \(activity.title)\(storedDistance)"
       ble.record(source: "rust", title: "activity.session.store.ok", body: "\(sessionID) \(activityType) \(logDistance)")
       refreshActivityTimeline(for: end)
+
+      // Rust SQLite is now the canonical store — kick the Swift cache to
+      // re-query so any view observing `CompletedWorkoutStore.workouts`
+      // (Home card, Workouts tab) picks the new session up immediately.
+      Task { await CompletedWorkoutStore.shared.refresh() }
       if shouldFinishSharedHealthCapture {
         stopHealthPacketCapture(reason: "activity_finished")
       } else if sessionDetectionMethod == "user_assigned", activeHealthPacketCapture == nil {

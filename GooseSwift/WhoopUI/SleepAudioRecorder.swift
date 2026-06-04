@@ -77,8 +77,13 @@ final class SleepAudioRecorder: ObservableObject {
 
   /// Stop listening. Called on wake or when toggle turns off.
   func disarm() {
+    // Remove the tap unconditionally. AVAudioEngine.isRunning can be false
+    // even while a tap is still registered (e.g. the session got bumped by
+    // an interruption). Leaving the stale tap behind makes the next
+    // installTap throw an obj-c exception and SIGABRT the app -- exactly
+    // the crash we hit after Start -> End -> Start.
+    engine.inputNode.removeTap(onBus: 0)
     if engine.isRunning {
-      engine.inputNode.removeTap(onBus: 0)
       engine.stop()
     }
     finishEventRecorder()
@@ -119,6 +124,11 @@ final class SleepAudioRecorder: ObservableObject {
 
   private func startEngine() throws {
     let input = engine.inputNode
+    // Defensive: drop any stale tap before installing a fresh one. If the
+    // previous session ended while the engine was paused (rather than
+    // running), disarm() may have skipped removeTap and the second
+    // installTap would throw NSException -> SIGABRT.
+    input.removeTap(onBus: 0)
     let format = input.outputFormat(forBus: 0)
     input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
       self?.process(buffer: buffer)

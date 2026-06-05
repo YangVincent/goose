@@ -18,6 +18,11 @@ struct WhoopHomeView: View {
   /// out of the `recovery_readings` table. Today's recovery is "the
   /// reading from last night's sleep" — same table.
   @State private var recoveryByDate: [String: Double] = [:]
+  /// Sleep composite scores (0-100) keyed by the wake date_key. Pulled
+  /// from the recovery payload's "sleep" component — the SleepReading
+  /// .sleep_score that goose_recovery_v0 was fed. Surfaces on the sleep
+  /// ring when the day has no WHOOP-imported sleepPerformancePct.
+  @State private var sleepByDate: [String: Double] = [:]
 
   var body: some View {
     NavigationStack {
@@ -210,31 +215,36 @@ struct WhoopHomeView: View {
 
     // Recovery: same key, fetched from recovery.latest_reading. The
     // bridge returns the most-recent row; for today's home that IS the
-    // last night's reading. For past dates the user actually wants the
-    // reading that woke them up that morning — same lookup, since each
-    // recovery row carries date_key.
-    if recoveryByDate[key] == nil {
+    // last night's reading. For past dates we walk the daily history.
+    // Also extract sleep_score from the components — surfaces on the
+    // sleep ring when there's no WHOOP-imported sleepPerformancePct.
+    if recoveryByDate[key] == nil || sleepByDate[key] == nil {
       Task.detached(priority: .userInitiated) {
         let bridge = GooseRustBridge()
         let response = try? bridge.request(
           method: "recovery.latest_reading",
           args: ["database_path": dbPath, "history_days": 30]
         )
-        // Latest row matches today's wake date; for past dates we look
-        // through the daily history list and pick the matching key.
-        var score: Double? = nil
+        var recoveryScore: Double? = nil
+        var sleepScore: Double? = nil
         let dateKey = (response?["date_key"] as? String)
         if dateKey == key,
            let output = (response?["score_result"] as? [String: Any])?["output"] as? [String: Any] {
-          score = (output["score_0_to_100"] as? Double)
+          recoveryScore = (output["score_0_to_100"] as? Double)
             ?? (output["score_0_to_100"] as? NSNumber).map { $0.doubleValue }
+          if let components = output["components"] as? [[String: Any]],
+             let sleepComponent = components.first(where: { ($0["name"] as? String) == "sleep" }) {
+            sleepScore = (sleepComponent["score_0_to_100"] as? Double)
+              ?? (sleepComponent["score_0_to_100"] as? NSNumber).map { $0.doubleValue }
+          }
         } else if let daily = response?["daily"] as? [[String: Any]],
                   let match = daily.first(where: { ($0["date_key"] as? String) == key }) {
-          score = (match["score_0_to_100"] as? Double)
+          recoveryScore = (match["score_0_to_100"] as? Double)
             ?? (match["score_0_to_100"] as? NSNumber).map { $0.doubleValue }
         }
         await MainActor.run {
-          if let score, score > 0 { recoveryByDate[key] = score }
+          if let s = recoveryScore, s > 0 { recoveryByDate[key] = s }
+          if let s = sleepScore, s > 0 { sleepByDate[key] = s }
         }
       }
     }
@@ -366,8 +376,12 @@ struct WhoopHomeView: View {
     if let perf = importedDailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct, perf > 0 {
       return (Int(perf.rounded()), .server)
     }
-    if let window = SleepWindowStore.shared.lastNight {
-      return (Int((window.performance * 100).rounded()), .local)
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = TimeZone.current
+    let key = formatter.string(from: selectedDay.currentDate)
+    if let local = sleepByDate[key], local > 0 {
+      return (Int(local.rounded()), .local)
     }
     return (nil, .none)
   }

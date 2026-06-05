@@ -29,10 +29,16 @@ struct DateStripView: View {
         }
         .padding(.horizontal, 22)
       }
-      .onAppear {
-        DispatchQueue.main.async {
-          proxy.scrollTo(selectedDay.currentDate, anchor: .center)
-        }
+      // Default to the trailing edge (today) so the strip never lands on
+      // a year-old date on first appear. The explicit scrollTo below
+      // then nudges to whatever selectedDay says (almost always today)
+      // once layout's stable.
+      .defaultScrollAnchor(.trailing)
+      .task {
+        // Wait one runloop tick for LazyHStack to lay out before scrolling,
+        // otherwise the proxy.scrollTo silently no-ops on cold launch.
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        proxy.scrollTo(selectedDay.currentDate, anchor: .center)
       }
     }
   }

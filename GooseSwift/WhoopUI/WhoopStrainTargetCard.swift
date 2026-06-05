@@ -117,22 +117,14 @@ struct WhoopStrainTargetCard: View {
   // MARK: - Recovery resolution (mirror of WhoopHomeView's logic)
 
   private var resolvedRecoveryScore: Int? {
+    // dailyStore.summary now overlays recovery_readings on top of
+    // imported_daily_summary, so any locally-computed recovery score
+    // (Goose-initiated sleep session) is already merged in. No need to
+    // re-compute via GooseRecoveryCalculator as a fallback.
     if let score = dailyStore.summary(for: selectedDay.currentDate)?.recoveryScore, score >= 0 {
       return Int(score.rounded())
     }
-    let hrvSeries = dailyStore.byDate.values.compactMap { $0.hrvRmssdMs }
-    var rhrSeries = dailyStore.byDate.values.compactMap { $0.restingHrBpm }
-    if let local = HeartRateSeriesStore.shared.restingEstimate() {
-      rhrSeries.append(local.bpm)
-    }
-    let sleep = dailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct
-    guard hrvSeries.count >= 4 || rhrSeries.count >= 4 else { return nil }
-    let score = GooseRecoveryCalculator.compute(
-      hrvSeries: hrvSeries,
-      rhrSeries: rhrSeries,
-      sleepPerformance: sleep
-    )
-    return score.confidence > 0 ? score.score : nil
+    return nil
   }
 
   private var currentStrain: Double {

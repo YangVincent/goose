@@ -187,26 +187,37 @@ struct WhoopRecoveryBreakdownCard: View {
 
   // MARK: - Compute
 
+  /// Build a breakdown from `dailyStore.summary` — already overlays the
+  /// recovery_readings, sleep_readings, and daily_strain_readings
+  /// typed tables on top of the WHOOP-imported daily summary, so HRV /
+  /// RHR / sleep perf come from the freshest available source per day.
+  /// Baselines are rolling medians over the dailyStore values.
   private func refresh() {
-    NightlyHRVStore.shared.refresh()
-
-    // SQLite-backed: pull series from imported daily summaries, fold in
-    // local nightly HRV + local resting-HR estimate.
-    var hrvSeries = dailyStore.byDate.values.compactMap { $0.hrvRmssdMs }
-    hrvSeries.append(contentsOf: NightlyHRVStore.shared.recentNights.map(\.medianRMSSD))
-    var rhrSeries = dailyStore.byDate.values.compactMap { $0.restingHrBpm }
-    if let localRHR = HeartRateSeriesStore.shared.restingEstimate() {
-      rhrSeries.append(localRHR.bpm)
+    guard let summary = dailyStore.summary(for: selectedDay.currentDate),
+          let recoveryScore = summary.recoveryScore else {
+      score = nil
+      return
     }
-
-    let sleep = dailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct
-      ?? SleepWindowStore.shared.lastNight.map { $0.performance * 100 }
-
-    guard hrvSeries.count >= 4 || rhrSeries.count >= 4 else { return }
-    score = GooseRecoveryCalculator.compute(
-      hrvSeries: hrvSeries,
-      rhrSeries: rhrSeries,
-      sleepPerformance: sleep
+    let hrvHistory: [Double] = dailyStore.byDate.values.compactMap { $0.hrvRmssdMs }
+    let rhrHistory: [Double] = dailyStore.byDate.values.compactMap { $0.restingHrBpm }
+    let intScore = Int(recoveryScore.rounded())
+    score = GooseRecoveryCalculator.Score(
+      score: intScore,
+      band: GooseRecoveryCalculator.Band(score: intScore),
+      hrvComponent: summary.hrvRmssdMs,
+      hrvBaseline: Self.median(hrvHistory),
+      rhrComponent: summary.restingHrBpm,
+      rhrBaseline: Self.median(rhrHistory),
+      sleepPerformance: summary.sleepPerformancePct,
+      baselineDayCount: max(hrvHistory.count, rhrHistory.count),
+      confidence: 1.0
     )
+  }
+
+  private static func median(_ values: [Double]) -> Double? {
+    guard !values.isEmpty else { return nil }
+    let sorted = values.sorted()
+    let n = sorted.count
+    return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
   }
 }

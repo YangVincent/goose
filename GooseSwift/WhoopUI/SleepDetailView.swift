@@ -829,11 +829,11 @@ struct SleepDetailView: View {
       GridItem(.flexible(), alignment: .leading),
       GridItem(.flexible(), alignment: .leading),
     ], spacing: 10) {
-      subscoreCell("DURATION", r.durationScore)
-      subscoreCell("EFFICIENCY", r.efficiencyScore)
-      subscoreCell("DEPTH", r.depthScore)
-      subscoreCell("HRV", r.hrvScore)
-      subscoreCell("RESTFUL", r.restfulnessScore)
+      subscoreCell("DURATION", r.durationScore, caption: "asleep vs 7.5h need")
+      subscoreCell("EFFICIENCY", r.efficiencyScore, caption: "asleep / time in bed")
+      subscoreCell("DEPTH", r.depthScore, caption: "deep / asleep (target 13–23%)")
+      subscoreCell("HRV", r.hrvScore, caption: "RMSSD vs 28d baseline")
+      subscoreCell("RESTFUL", r.restfulnessScore, caption: "1 − awake share of bed")
     }
     Divider().overlay(Color.white.opacity(0.1))
     HStack(spacing: 14) {
@@ -853,7 +853,7 @@ struct SleepDetailView: View {
     }
   }
 
-  private func subscoreCell(_ label: String, _ value: Double) -> some View {
+  private func subscoreCell(_ label: String, _ value: Double, caption: String? = nil) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       Text(label)
         .font(.system(size: 9, weight: .heavy, design: .rounded))
@@ -876,6 +876,13 @@ struct SleepDetailView: View {
         }
       }
       .frame(height: 3)
+      if let caption {
+        Text(caption)
+          .font(.system(size: 8, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white.opacity(0.4))
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
+      }
     }
   }
 
@@ -937,12 +944,12 @@ struct SleepDetailView: View {
       GridItem(.flexible(), alignment: .leading),
       GridItem(.flexible(), alignment: .leading),
     ], spacing: 10) {
-      subscoreCell("HRV (35%)", r.hrvScore)
-      subscoreCell("RHR (20%)", r.rhrScore)
-      subscoreCell("SLEEP (15%)", r.sleepScore)
-      subscoreCell("RESP (10%)", r.respiratoryScore)
-      subscoreCell("TEMP (10%)", r.temperatureScore)
-      subscoreCell("STRAIN (10%)", r.priorStrainScore)
+      subscoreCell("HRV (35%)", r.hrvScore, caption: "tonight vs 28d baseline")
+      subscoreCell("RHR (20%)", r.rhrScore, caption: "lower vs baseline → recovered")
+      subscoreCell("SLEEP (15%)", r.sleepScore, caption: "composite sleep score")
+      subscoreCell("RESP (10%)", r.respiratoryScore, caption: "neutralized — no local estimator")
+      subscoreCell("TEMP (10%)", r.temperatureScore, caption: "neutralized — no local estimator")
+      subscoreCell("STRAIN (10%)", r.priorStrainScore, caption: "yesterday's strain (low → more recovered)")
     }
     Divider().overlay(Color.white.opacity(0.1))
     HStack(spacing: 14) {

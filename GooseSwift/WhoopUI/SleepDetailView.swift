@@ -61,7 +61,11 @@ struct SleepDetailView: View {
         await importedStore.bootstrapIfNeeded(databasePath: HealthDataStore.defaultDatabasePath())
       }
       audioRecorder.reloadRecentEvents()
-      sleepSession.backfillKnownNightIfMissing()
+      // backfillKnownNightIfMissing was a one-off backfill of a specific
+      // 2026-06-04 night; it now runs an O(N×M) loop on the main thread
+      // every Sleep tap because the user's real sessions don't match the
+      // hardcoded start time. Removed — pastSessions are populated by
+      // Start/End Sleep, not by this legacy migrator.
       refreshReading()
     }
     .onChange(of: selectedDay.currentDate) { _, _ in

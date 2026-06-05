@@ -43,6 +43,12 @@ final class WhoopImportedDailyStore: ObservableObject {
   }
 
   @Published private(set) var byDate: [String: DailySummary] = [:]
+  /// `refreshFromLocal` is throttled — re-loading 365 days of rows on
+  /// every WhoopHomeView appear is expensive and the data only grows
+  /// once per session. The store only re-fetches if `byDate` is empty
+  /// or the last refresh is older than this interval.
+  private var lastRefreshAt: Date?
+  private static let minRefreshInterval: TimeInterval = 60
   @Published private(set) var importedCount: Int = 0
   @Published private(set) var lastImportError: String?
 
@@ -159,6 +165,11 @@ final class WhoopImportedDailyStore: ObservableObject {
   // MARK: - Local read
 
   func refreshFromLocal(databasePath: String) async {
+    if !byDate.isEmpty,
+       let last = lastRefreshAt,
+       Date().timeIntervalSince(last) < Self.minRefreshInterval {
+      return
+    }
     let calendar = Calendar.current
     let endDate = Date()
     // Read window: 365 days back. Local SQLite is cheap; pull everything
@@ -208,6 +219,7 @@ final class WhoopImportedDailyStore: ObservableObject {
       }
       self.byDate = byKey
       self.importedCount = byKey.count
+      self.lastRefreshAt = Date()
     } catch {
       self.lastImportError = "list failed: \(error)"
     }

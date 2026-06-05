@@ -179,11 +179,15 @@ struct SleepDetailView: View {
               .frame(height: 96)
               .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
           } else if let summary = dailyStore.summary(for: selectedDay.currentDate),
-                    summary.sleepInBedMs != nil {
-            // Stack the server's stage totals into 4 horizontal rows, one
-            // per stage, so the Y-axis labels still align with rows.
-            stagesRowsFromSummary(summary: summary)
+                    let synthetic = Self.syntheticHypnogram(from: summary, selectedDay: selectedDay.currentDate, reading: reading) {
+            // No per-epoch data available, but we have stage totals.
+            // Render a synthesized timeline that lays out the four
+            // stages along the X axis in proportion to their minutes,
+            // arranged at their Y rows — that's a 2-axis chart, not the
+            // proportional bar chart that was the previous fallback.
+            hypnogramTimeline(synthetic)
               .frame(height: 96)
+              .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
           } else {
             ZStack {
               RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -1366,6 +1370,65 @@ struct SleepDetailView: View {
   private static let yellowAccent = Color(red: 1.0, green: 0.88, blue: 0.40)
   private static let redAccent = Color(red: 1.0, green: 0.37, blue: 0.42)
   private static let hrvAccent = Color(red: 0.55, green: 0.85, blue: 1.0)
+
+  /// Build a stage timeline from the per-day summary stage totals when
+  /// we don't have per-epoch hypnogram data. Lays out stages along the
+  /// window in proportion to their minutes (deep first, then light,
+  /// REM, awake) — not a true epoch sequence, but renders as the same
+  /// 2-axis stage chart as the real hypnogram instead of falling back
+  /// to the proportional bar chart.
+  private static func syntheticHypnogram(
+    from summary: WhoopImportedDailyStore.DailySummary,
+    selectedDay: Date,
+    reading: SleepReadingSnapshot?
+  ) -> SleepStageEstimator.Hypnogram? {
+    let totalMs = (summary.sleepInBedMs ?? 0)
+    guard totalMs > 0 else { return nil }
+    // Synthesize the window as 22:00 of (selectedDay - 1) -> 22:00 +
+    // TIB minutes. The exact clock alignment isn't meaningful since we
+    // don't have epoch-by-epoch data; we just need a span over which
+    // to lay out the stage chunks.
+    let cal = Calendar.current
+    let dayStart = cal.startOfDay(for: selectedDay)
+    let windowStart = cal.date(byAdding: .hour, value: -2, to: dayStart) ?? dayStart
+    let windowEnd = windowStart.addingTimeInterval(TimeInterval(totalMs / 1000))
+    _ = reading // currently unused; keeps the signature future-friendly when start/end land on the snapshot
+    let stages: [(SleepStageEstimator.Stage, Int)] = [
+      (.deep, summary.sleepDeepMs ?? 0),
+      (.light, summary.sleepLightMs ?? 0),
+      (.rem, summary.sleepRemMs ?? 0),
+      (.wake, summary.sleepAwakeMs ?? 0),
+    ]
+    let total = Double(stages.reduce(0) { $0 + $1.1 })
+    guard total > 0 else { return nil }
+    let windowSecs = windowEnd.timeIntervalSince(windowStart)
+    var cursor = windowStart
+    var epochs: [SleepStageEstimator.Epoch] = []
+    var stageMinutes: [SleepStageEstimator.Stage: Double] = [:]
+    for (stage, ms) in stages where ms > 0 {
+      let frac = Double(ms) / total
+      let durationSecs = windowSecs * frac
+      let end = cursor.addingTimeInterval(durationSecs)
+      epochs.append(SleepStageEstimator.Epoch(
+        id: UUID(),
+        start: cursor,
+        end: end,
+        stage: stage,
+        meanHR: 0,
+        hrStd: 0,
+        rmssdMS: nil,
+        skinTempRaw: nil
+      ))
+      stageMinutes[stage, default: 0] += Double(ms) / 60_000.0
+      cursor = end
+    }
+    return SleepStageEstimator.Hypnogram(
+      windowStart: windowStart,
+      windowEnd: windowEnd,
+      epochs: epochs,
+      stageMinutes: stageMinutes
+    )
+  }
 
   /// Pull a sorted-by-date HRV trend out of the daily store. The store
   /// already overlays sleep_readings.hrv_mean_rmssd_ms on top of the

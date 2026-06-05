@@ -117,22 +117,50 @@ enum LocalHealthspanCalculator {
     let consistencyApprox: Double
   }
 
+  /// Per-night windows, used by the Age estimate + trend charts.
+  /// First pulls every PastSession we have (user-logged sleep, ground
+  /// truth) inside the 30-day window. Then for each calendar day in
+  /// range without a logged session, falls back to
+  /// SleepWindowDetector.detect against that day's HR. This drops the
+  /// 30 × HR-fetch+detect cost dramatically for days the user logged,
+  /// and means the Age estimate doesn't go `--` just because HR-only
+  /// detection failed on a sparse-data day.
   private static func nightlySleepWindows(daysBack: Int, now: Date) -> [NightlyWindow] {
     let calendar = Calendar.current
     let store = HeartRateSeriesStore.shared
     let resting = store.restingEstimate()
+    let cutoff = calendar.date(byAdding: .day, value: -daysBack, to: now) ?? now
+    var seenDayKeys = Set<String>()
     var results: [NightlyWindow] = []
+    let isoFmt = DateFormatter()
+    isoFmt.dateFormat = "yyyy-MM-dd"
+    isoFmt.timeZone = TimeZone.current
+
+    for session in SleepSessionStore.shared.pastSessions
+      where session.startedAt >= cutoff && session.endedAt <= now {
+      let dayKey = isoFmt.string(from: session.endedAt)
+      guard !seenDayKeys.contains(dayKey) else { continue }
+      seenDayKeys.insert(dayKey)
+      results.append(NightlyWindow(
+        onset: session.startedAt,
+        wake: session.endedAt,
+        durationHours: session.durationSeconds / 3600,
+        consistencyApprox: 1.0
+      ))
+    }
+
     for offset in 0..<daysBack {
-      // Wake reference = 9am of the target morning. Look back 18 hours
-      // from there to catch the prior night's sleep.
       guard let dayStart = calendar.date(byAdding: .day, value: -offset, to: calendar.startOfDay(for: now)),
             let wakeReference = calendar.date(byAdding: .hour, value: 9, to: dayStart) else { continue }
+      let dayKey = isoFmt.string(from: wakeReference)
+      if seenDayKeys.contains(dayKey) { continue }
       let samples = store.samples(from: wakeReference.addingTimeInterval(-18 * 3600), to: wakeReference)
       guard let window = SleepWindowDetector.detect(
         samples: samples,
         restingEstimate: resting,
         now: wakeReference
       ) else { continue }
+      seenDayKeys.insert(dayKey)
       results.append(NightlyWindow(
         onset: window.onset,
         wake: window.wake,

@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 22;
+pub const CURRENT_SCHEMA_VERSION: i64 = 25;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -1855,6 +1855,66 @@ impl GooseStore {
 
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (22);
             PRAGMA user_version = 22;
+
+            -- v23: per-30s-epoch hypnogram persistence. Filled by
+            -- sleep.compute_reading (called from sleep_reading.rs) so the
+            -- SleepDetailView hypnogram is rendered straight from sqlite
+            -- instead of recomputed on every view appear.
+            CREATE TABLE IF NOT EXISTS sleep_epochs (
+                session_id TEXT NOT NULL,
+                epoch_index INTEGER NOT NULL,
+                epoch_start_unix_ms INTEGER NOT NULL,
+                epoch_end_unix_ms INTEGER NOT NULL,
+                stage TEXT NOT NULL CHECK (stage IN ('wake','light','rem','deep','n/a')),
+                hr_mean_bpm REAL,
+                hr_std_bpm REAL,
+                rmssd_ms REAL,
+                movement_intensity REAL,
+                PRIMARY KEY (session_id, epoch_index),
+                FOREIGN KEY (session_id) REFERENCES sleep_readings(session_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_sleep_epochs_start
+                ON sleep_epochs(epoch_start_unix_ms);
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (23);
+            PRAGMA user_version = 23;
+
+            -- v24: source columns + WHOOP-shaped sleep fields. Lets
+            -- whoop.cloud rows live in the same typed tables as
+            -- goose.local computed rows, with `source` distinguishing.
+            -- Conflict semantics: local wins by session_id (UPSERT); WHOOP
+            -- only fills date_keys that the local path hasn't produced.
+            ALTER TABLE sleep_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local';
+            ALTER TABLE sleep_readings ADD COLUMN rem_minutes INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sleep_readings ADD COLUMN cycle_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sleep_readings ADD COLUMN disturbance_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sleep_readings ADD COLUMN sleep_need_ms INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sleep_readings ADD COLUMN date_key TEXT NOT NULL DEFAULT '';
+            CREATE INDEX IF NOT EXISTS idx_sleep_readings_date_key
+                ON sleep_readings(date_key);
+
+            ALTER TABLE recovery_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local';
+
+            ALTER TABLE daily_strain_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local';
+            ALTER TABLE daily_strain_readings ADD COLUMN strain_kilojoules REAL NOT NULL DEFAULT 0;
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (24);
+            PRAGMA user_version = 24;
+
+            -- v25: typed mirror for daily vitals (SpO2, skin temp).
+            -- Until local K18 vitals extraction lands the only writer
+            -- is the WHOOP import. Local writer is a follow-up TODO.
+            CREATE TABLE IF NOT EXISTS daily_vitals_readings (
+                date_key TEXT PRIMARY KEY,
+                spo2_pct REAL,
+                skin_temp_c REAL,
+                source TEXT NOT NULL DEFAULT 'goose.local',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (25);
+            PRAGMA user_version = 25;
             "#,
         )?;
         self.drop_decoded_frame_parsed_payload_json_column()?;

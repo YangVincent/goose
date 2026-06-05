@@ -20,8 +20,16 @@ struct WhoopSleepEnvironmentCard: View {
     let ambientMean: Double?
     let ambientMax: Double?
     let ambientReadings: [Double]
-    let skinTempMean: Double?
-    let skinTempReadings: [Double]
+    /// Mean skin temperature in °C (raw ADC / 100, K18 byte offset).
+    let skinTempMeanC: Double?
+    /// Min/max in °C — useful to see the mid-sleep dip + pre-wake rise.
+    let skinTempMinC: Double?
+    let skinTempMaxC: Double?
+    /// Sparkline in °C, not raw — readable Y axis.
+    let skinTempReadingsC: [Double]
+    /// Device-reported SpO2 percent (K18 daily-headline value embedded
+    /// in every frame; effectively constant over a night).
+    let deviceSpo2Pct: Double?
     let skinContactOnPercent: Double
     let windowStart: Date
     let windowEnd: Date
@@ -61,7 +69,9 @@ struct WhoopSleepEnvironmentCard: View {
     }
     let samples = SensorSampleStore.shared.snapshot(from: start, to: end)
     let ambient = samples.compactMap { $0.ambientLight.map(Double.init) }
-    let skin = samples.compactMap { $0.skinTempRaw.map(Double.init) }
+    // K18 skin_temp_raw is u16 = °C × 100.
+    let skinC = samples.compactMap { $0.skinTempRaw.map { Double($0) / 100.0 } }
+    let spo2 = samples.compactMap { $0.spo2Pct.map(Double.init) }
     let contacts = samples.compactMap { $0.skinContact }
     let onCount = contacts.filter { $0 != 0 }.count
 
@@ -70,8 +80,11 @@ struct WhoopSleepEnvironmentCard: View {
       ambientMean: average(ambient),
       ambientMax: ambient.max(),
       ambientReadings: Array(ambient.suffix(120)),
-      skinTempMean: average(skin),
-      skinTempReadings: Array(skin.suffix(120)),
+      skinTempMeanC: average(skinC),
+      skinTempMinC: skinC.min(),
+      skinTempMaxC: skinC.max(),
+      skinTempReadingsC: Array(skinC.suffix(120)),
+      deviceSpo2Pct: average(spo2),
       skinContactOnPercent: contacts.isEmpty ? 0 : Double(onCount) / Double(contacts.count) * 100,
       windowStart: start,
       windowEnd: end
@@ -183,30 +196,51 @@ struct WhoopSleepEnvironmentCard: View {
   }
 
   private func contentRow(_ snapshot: Snapshot) -> some View {
-    HStack(spacing: 10) {
-      statCell(
-        label: "AVG LIGHT",
-        value: snapshot.ambientMean.map { String(format: "%.0f", $0) } ?? "--",
-        tint: Color(red: 1.0, green: 0.88, blue: 0.40)
-      )
-      statCell(
-        label: "PEAK LIGHT",
-        value: snapshot.ambientMax.map { String(format: "%.0f", $0) } ?? "--",
-        tint: Color(red: 1.0, green: 0.55, blue: 0.30)
-      )
-      statCell(
-        label: "SKIN TEMP",
-        value: snapshot.skinTempMean.map { String(format: "%.0f", $0) } ?? "--",
-        tint: Color(red: 0.85, green: 0.55, blue: 1.0)
-      )
-      statCell(
-        label: "CONTACT",
-        value: String(format: "%.0f%%", snapshot.skinContactOnPercent),
-        tint: snapshot.skinContactOnPercent > 80
-          ? Color(red: 0.18, green: 0.88, blue: 0.66)
-          : Color(red: 1.0, green: 0.37, blue: 0.42)
-      )
+    VStack(spacing: 8) {
+      HStack(spacing: 10) {
+        statCell(
+          label: "SKIN TEMP",
+          value: snapshot.skinTempMeanC.map { String(format: "%.1f°C", $0) } ?? "--",
+          tint: Color(red: 0.85, green: 0.55, blue: 1.0)
+        )
+        statCell(
+          label: "TEMP RANGE",
+          value: tempRangeLabel(min: snapshot.skinTempMinC, max: snapshot.skinTempMaxC),
+          tint: Color(red: 0.65, green: 0.45, blue: 0.95)
+        )
+        statCell(
+          label: "DEVICE SPO₂",
+          value: snapshot.deviceSpo2Pct.map { String(format: "%.0f%%", $0) } ?? "--",
+          tint: Color(red: 0.55, green: 0.85, blue: 1.0)
+        )
+        statCell(
+          label: "CONTACT",
+          value: String(format: "%.0f%%", snapshot.skinContactOnPercent),
+          tint: snapshot.skinContactOnPercent > 80
+            ? Color(red: 0.18, green: 0.88, blue: 0.66)
+            : Color(red: 1.0, green: 0.37, blue: 0.42)
+        )
+      }
+      HStack(spacing: 10) {
+        statCell(
+          label: "AVG LIGHT",
+          value: snapshot.ambientMean.map { String(format: "%.0f", $0) } ?? "--",
+          tint: Color(red: 1.0, green: 0.88, blue: 0.40)
+        )
+        statCell(
+          label: "PEAK LIGHT",
+          value: snapshot.ambientMax.map { String(format: "%.0f", $0) } ?? "--",
+          tint: Color(red: 1.0, green: 0.55, blue: 0.30)
+        )
+        Spacer().frame(maxWidth: .infinity)
+        Spacer().frame(maxWidth: .infinity)
+      }
     }
+  }
+
+  private func tempRangeLabel(min: Double?, max: Double?) -> String {
+    guard let lo = min, let hi = max else { return "--" }
+    return String(format: "%.1f–%.1f", lo, hi)
   }
 
   private func statCell(label: String, value: String, tint: Color) -> some View {
@@ -231,7 +265,7 @@ struct WhoopSleepEnvironmentCard: View {
   private func chartsRow(_ snapshot: Snapshot) -> some View {
     HStack(spacing: 12) {
       miniChart(values: snapshot.ambientReadings, label: "LIGHT", tint: Color(red: 1.0, green: 0.88, blue: 0.40))
-      miniChart(values: snapshot.skinTempReadings, label: "SKIN", tint: Color(red: 0.85, green: 0.55, blue: 1.0))
+      miniChart(values: snapshot.skinTempReadingsC, label: "SKIN °C", tint: Color(red: 0.85, green: 0.55, blue: 1.0))
     }
   }
 

@@ -56,8 +56,8 @@ struct SensorInspectorView: View {
           )
 
           channelCard(
-            title: "SKIN TEMP (RAW)",
-            unit: "ADC",
+            title: "SKIN TEMP",
+            unit: "°C",
             values: skinTempSeries,
             tint: Color(red: 1.0, green: 0.55, blue: 0.30)
           )
@@ -112,7 +112,8 @@ struct SensorInspectorView: View {
     samples.compactMap { $0.ambientLight.map(Double.init) }
   }
   private var skinTempSeries: [Double] {
-    samples.compactMap { $0.skinTempRaw.map(Double.init) }
+    // K18 skin_temp_raw is u16 = °C × 100.
+    samples.compactMap { $0.skinTempRaw.map { Double($0) / 100.0 } }
   }
   private var ppgGreenSeries: [Double] {
     samples.compactMap { $0.ppgGreen.map(Double.init) }

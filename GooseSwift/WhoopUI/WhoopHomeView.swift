@@ -131,9 +131,13 @@ struct WhoopHomeView: View {
   /// up front so a stale value from a previous (pre-compute) load can't
   /// linger past a refresh.
   private func refreshHomeData() {
-    pastStrainByDate.removeAll()
-    recoveryByDate.removeAll()
-    sleepByDate.removeAll()
+    // Don't clear the dicts up-front — the async bridge fetches below
+    // overwrite each key when they complete, and showing the stale value
+    // for 1-2 seconds (the round-trip) avoids the recovery ring flashing
+    // empty on every home tap. Strain and sleep don't have this problem
+    // because they read from in-memory observable stores; recovery is
+    // the only one keyed by a per-refresh @State dict, so clearing it
+    // here was the entire visible flicker.
     // Legacy backfill removed — see SleepDetailView for the same fix.
     DayStrainStore.shared.refresh()
     DayStrainStore.finalizePastDaysIfNeeded()

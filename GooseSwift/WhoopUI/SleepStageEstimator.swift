@@ -209,25 +209,73 @@ enum SleepStageEstimator {
 
   // MARK: - Smoothing
 
-  /// 3-epoch majority filter — prevents stages from flipping every 30s.
+  /// Three-stage smoother:
+  ///
+  /// 1. **Deep-bout length rule** — real deep-sleep bouts are 10-40 minutes
+  ///    of slow-wave activity, never single dips. Demote any Deep run
+  ///    shorter than `minDeepRunEpochs` (20 = 10 minutes at 30s epochs).
+  /// 2. **Deep-isolation rule** — deep sleep is sandwiched by other sleep
+  ///    stages, not by Wake. A Deep run that touches a Wake epoch on
+  ///    either side is a misclassified HR dip during drowsy / fragmented
+  ///    sleep. Demote those runs to Light too.
+  /// 3. **3-epoch majority filter** — kills remaining single-epoch outliers.
+  ///
+  /// Without (1)+(2) the morning "barely awake → brief HR dip → barely
+  /// awake" pattern shows up as alternating Awake/Deep zigzag in the
+  /// hypnogram, and inflates depth_score on otherwise light-sleep nights.
   private static func smooth(_ epochs: [Epoch]) -> [Epoch] {
     guard epochs.count >= 3 else { return epochs }
-    var smoothed = epochs
-    for idx in 1..<(epochs.count - 1) {
-      let prev = epochs[idx - 1].stage
-      let cur = epochs[idx].stage
-      let next = epochs[idx + 1].stage
+    let minDeepRunEpochs = 20  // 10 minutes at 30s epochs
+
+    // Stage 1+2: walk Deep runs, demote if too short OR if either neighbour
+    // is Wake.
+    var demoted = epochs
+    var i = 0
+    while i < demoted.count {
+      if demoted[i].stage == .deep {
+        var j = i
+        while j < demoted.count && demoted[j].stage == .deep { j += 1 }
+        let runLen = j - i
+        let prevStage: Stage? = i > 0 ? demoted[i - 1].stage : nil
+        let nextStage: Stage? = j < demoted.count ? demoted[j].stage : nil
+        let touchesWake = prevStage == .wake || nextStage == .wake
+        if runLen < minDeepRunEpochs || touchesWake {
+          for k in i..<j {
+            demoted[k] = Epoch(
+              id: demoted[k].id,
+              start: demoted[k].start,
+              end: demoted[k].end,
+              stage: .light,
+              meanHR: demoted[k].meanHR,
+              hrStd: demoted[k].hrStd,
+              rmssdMS: demoted[k].rmssdMS,
+              skinTempRaw: demoted[k].skinTempRaw
+            )
+          }
+        }
+        i = j
+      } else {
+        i += 1
+      }
+    }
+
+    // Stage 3: 3-epoch majority filter on the demoted series.
+    var smoothed = demoted
+    for idx in 1..<(demoted.count - 1) {
+      let prev = demoted[idx - 1].stage
+      let cur = demoted[idx].stage
+      let next = demoted[idx + 1].stage
       // If current is a single-epoch outlier and prev == next, snap.
       if prev == next && cur != prev {
         smoothed[idx] = Epoch(
-          id: epochs[idx].id,
-          start: epochs[idx].start,
-          end: epochs[idx].end,
+          id: demoted[idx].id,
+          start: demoted[idx].start,
+          end: demoted[idx].end,
           stage: prev,
-          meanHR: epochs[idx].meanHR,
-          hrStd: epochs[idx].hrStd,
-          rmssdMS: epochs[idx].rmssdMS,
-          skinTempRaw: epochs[idx].skinTempRaw
+          meanHR: demoted[idx].meanHR,
+          hrStd: demoted[idx].hrStd,
+          rmssdMS: demoted[idx].rmssdMS,
+          skinTempRaw: demoted[idx].skinTempRaw
         )
       }
     }

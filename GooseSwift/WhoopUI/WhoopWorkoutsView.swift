@@ -4,44 +4,46 @@ struct WhoopWorkoutsView: View {
   @ObservedObject private var localWorkouts = CompletedWorkoutStore.shared
 
   var body: some View {
-    NavigationStack {
-      ZStack {
-        Self.background.ignoresSafeArea()
-        ScrollView {
-          LazyVStack(spacing: 12) {
-            header
+    // No inner NavigationStack — AppShellView wraps the .health tab in a
+    // NavigationStack(path: $router.healthPath). Nesting another one here
+    // caused the system nav bar to flash white on tab entry as the inner
+    // stack initialized over the outer one.
+    ZStack {
+      Self.background.ignoresSafeArea()
+      ScrollView {
+        LazyVStack(spacing: 12) {
+          header
 
-            if localWorkouts.workouts.isEmpty {
-              Text("NO ACTIVITIES")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(2)
-                .foregroundStyle(.white.opacity(0.4))
-                .padding(.top, 40)
-            }
-
-            // All workouts read from local SQLite via CompletedWorkoutStore.
-            // The historical WHOOP backfill via WhoopActivityImporter has
-            // already populated this store; runtime cloud reads are gone.
-            ForEach(localWorkouts.workouts) { workout in
-              NavigationLink {
-                WorkoutDetailView(workout: workout)
-              } label: {
-                localWorkoutRow(workout)
-              }
-              .buttonStyle(.plain)
-            }
+          if localWorkouts.workouts.isEmpty {
+            Text("NO ACTIVITIES")
+              .font(.system(size: 11, weight: .heavy, design: .rounded))
+              .tracking(2)
+              .foregroundStyle(.white.opacity(0.4))
+              .padding(.top, 40)
           }
-          .padding(.horizontal, 18)
-          .padding(.bottom, 32)
+
+          // All workouts read from local SQLite via CompletedWorkoutStore.
+          // The historical WHOOP backfill via WhoopActivityImporter has
+          // already populated this store; runtime cloud reads are gone.
+          ForEach(localWorkouts.workouts) { workout in
+            NavigationLink {
+              WorkoutDetailView(workout: workout)
+            } label: {
+              localWorkoutRow(workout)
+            }
+            .buttonStyle(.plain)
+          }
         }
-        .refreshable {
-          await localWorkouts.refresh()
-        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 32)
       }
-      .navigationBarHidden(true)
-      .task {
+      .refreshable {
         await localWorkouts.refresh()
       }
+    }
+    .navigationBarHidden(true)
+    .task {
+      await localWorkouts.refresh()
     }
   }
 

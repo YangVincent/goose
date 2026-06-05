@@ -330,6 +330,36 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> Classi
             row.stage = Stage::Light;
         }
     }
+
+    // Post-pass: deep sleep physiologically comes in 10-40 minute bouts
+    // sandwiched by other sleep stages. Demote any Deep run that is
+    // either (a) shorter than MIN_DEEP_RUN_MIN minutes or (b) touches an
+    // Awake/NotApplicable epoch on either side. Without this, brief HR
+    // troughs during drowsy or fragmented morning sleep get counted as
+    // Deep and inflate depth_score to 100/100 on light-sleep nights.
+    const MIN_DEEP_RUN_MIN: usize = 10;
+    let mut i = 0;
+    while i < rows.len() {
+        if rows[i].stage == Stage::Deep {
+            let mut j = i;
+            while j < rows.len() && rows[j].stage == Stage::Deep {
+                j += 1;
+            }
+            let touches_wake = (i > 0
+                && matches!(rows[i - 1].stage, Stage::Awake | Stage::NotApplicable))
+                || (j < rows.len()
+                    && matches!(rows[j].stage, Stage::Awake | Stage::NotApplicable));
+            if (j - i) < MIN_DEEP_RUN_MIN || touches_wake {
+                for row in rows.iter_mut().take(j).skip(i) {
+                    row.stage = Stage::Light;
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+
     ClassifyOutputs { observed_resting }
 }
 

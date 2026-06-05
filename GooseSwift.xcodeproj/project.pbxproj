@@ -94,7 +94,6 @@
 			F100000000000000000000CB /* WhoopUI/UnitFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CB /* WhoopUI/UnitFormatting.swift */; };
 			F100000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift */; };
 			F100000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift */; };
-			F100000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift */; };
 			F100000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift */; };
 			F100000000000000000000C6 /* WhoopUI/JournalEntryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C6 /* WhoopUI/JournalEntryCard.swift */; };
 			F100000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift */; };
@@ -301,7 +300,6 @@
 			F200000000000000000000CB /* WhoopUI/UnitFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/UnitFormatting.swift; sourceTree = "<group>"; };
 			F200000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/DayHRTimelineCard.swift; sourceTree = "<group>"; };
 			F200000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopBedtimeRecommendationCard.swift; sourceTree = "<group>"; };
-			F200000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/NightlyHRVCalculator.swift; sourceTree = "<group>"; };
 			F200000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WorkoutDetailView.swift; sourceTree = "<group>"; };
 			F200000000000000000000C6 /* WhoopUI/JournalEntryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/JournalEntryCard.swift; sourceTree = "<group>"; };
 			F200000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StrapBatteryPanelView.swift; sourceTree = "<group>"; };
@@ -632,7 +630,6 @@
 				F200000000000000000000CB /* WhoopUI/UnitFormatting.swift */,
 				F200000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift */,
 				F200000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift */,
-				F200000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift */,
 				F200000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift */,
 				F200000000000000000000C6 /* WhoopUI/JournalEntryCard.swift */,
 				F200000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift */,
@@ -1002,7 +999,6 @@
 				F100000000000000000000CB /* WhoopUI/UnitFormatting.swift in Sources */,
 				F100000000000000000000CA /* WhoopUI/DayHRTimelineCard.swift in Sources */,
 				F100000000000000000000C9 /* WhoopUI/WhoopBedtimeRecommendationCard.swift in Sources */,
-				F100000000000000000000C8 /* WhoopUI/NightlyHRVCalculator.swift in Sources */,
 				F100000000000000000000C7 /* WhoopUI/WorkoutDetailView.swift in Sources */,
 				F100000000000000000000C6 /* WhoopUI/JournalEntryCard.swift in Sources */,
 				F100000000000000000000C5 /* WhoopUI/StrapBatteryPanelView.swift in Sources */,

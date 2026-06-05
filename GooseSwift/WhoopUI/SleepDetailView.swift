@@ -7,7 +7,9 @@ import Charts
 struct SleepDetailView: View {
   @ObservedObject private var selectedDay = SelectedDayStore.shared
   @ObservedObject private var sleepStore = SleepWindowStore.shared
-  @ObservedObject private var hrvStore = NightlyHRVStore.shared
+  // NightlyHRVStore was deleted; HRV display now reads from the
+  // unified dailyStore overlay (sleep_readings.hrv_mean_rmssd_ms +
+  // imported HRV from WHOOP, whichever is fresher per date_key).
   @ObservedObject private var hypnoStore = SleepHypnogramStore.shared
   @ObservedObject private var importedStore = WhoopImportedSleepStore.shared
   @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
@@ -483,7 +485,7 @@ struct SleepDetailView: View {
       wakeReference = cal.date(byAdding: .hour, value: 12, to: dayStart) ?? selectedDay.currentDate
     }
     sleepStore.refresh(wakeReference: wakeReference)
-    hrvStore.refresh()
+    // hrvStore.refresh() was here; reads now flow through dailyStore.
     hypnoStore.refresh()
   }
 
@@ -697,19 +699,12 @@ struct SleepDetailView: View {
     let wake: String
   }
 
-  /// Rough average over the last 7 detected nights using the nightly HRV
-  /// store's onset/wake fields (those windows match the sleep detector).
+  /// Rough average over the last 7 nights — was previously fed by
+  /// `NightlyHRVStore.recentNights` (onset/wake fields), now removed.
+  /// Returns nil until `DailySummary` carries per-night start/end
+  /// times from `sleep_readings` (related to TODO #44).
   private func avgWindowConsistency() -> WindowConsistency? {
-    let nights = hrvStore.recentNights.suffix(7)
-    guard nights.count >= 2 else { return nil }
-    let onsetMins = nights.map { hour24Minutes(of: $0.onset) }
-    let wakeMins = nights.map { hour24Minutes(of: $0.wake) }
-    let avgOnset = onsetMins.reduce(0, +) / onsetMins.count
-    let avgWake = wakeMins.reduce(0, +) / wakeMins.count
-    return WindowConsistency(
-      bedtime: clockFromMinutes(avgOnset),
-      wake: clockFromMinutes(avgWake)
-    )
+    nil
   }
 
   private func hour24Minutes(of date: Date) -> Int {
@@ -1201,26 +1196,27 @@ struct SleepDetailView: View {
           .font(.system(size: 10, weight: .heavy, design: .rounded))
           .tracking(2)
           .foregroundStyle(.white.opacity(0.55))
-        if let night = hrvStore.lastNight {
+        let summary = dailyStore.summary(for: selectedDay.currentDate)
+        let trend = Self.hrvTrend(from: dailyStore.byDate)
+        if let hrv = summary?.hrvRmssdMs {
           HStack(spacing: 14) {
-            kvCell(label: "MEDIAN", value: String(format: "%.0f ms", night.medianRMSSD))
-            kvCell(label: "MEAN", value: String(format: "%.0f ms", night.meanRMSSD))
-            kvCell(label: "WINDOWS", value: "\(night.windowCount)")
-            kvCell(label: "BEATS", value: "\(night.totalBeats)")
+            kvCell(label: "MEDIAN", value: String(format: "%.0f ms", hrv))
+            kvCell(label: "BASELINE", value: trend.baseline.map { String(format: "%.0f ms", $0) } ?? "—")
+            kvCell(label: "NIGHTS", value: "\(trend.points.count)")
             Spacer(minLength: 0)
           }
-          if hrvStore.recentNights.count >= 3 {
+          if trend.points.count >= 3 {
             Chart {
-              ForEach(hrvStore.recentNights) { night in
+              ForEach(trend.points, id: \.dateKey) { point in
                 LineMark(
-                  x: .value("date", night.dateKey),
-                  y: .value("RMSSD", night.medianRMSSD)
+                  x: .value("date", point.dateKey),
+                  y: .value("RMSSD", point.value)
                 )
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(Self.hrvAccent)
                 PointMark(
-                  x: .value("date", night.dateKey),
-                  y: .value("RMSSD", night.medianRMSSD)
+                  x: .value("date", point.dateKey),
+                  y: .value("RMSSD", point.value)
                 )
                 .foregroundStyle(Self.hrvAccent)
                 .symbolSize(15)
@@ -1361,6 +1357,30 @@ struct SleepDetailView: View {
   private static let yellowAccent = Color(red: 1.0, green: 0.88, blue: 0.40)
   private static let redAccent = Color(red: 1.0, green: 0.37, blue: 0.42)
   private static let hrvAccent = Color(red: 0.55, green: 0.85, blue: 1.0)
+
+  /// Pull a sorted-by-date HRV trend out of the daily store. The store
+  /// already overlays sleep_readings.hrv_mean_rmssd_ms on top of the
+  /// imported_daily_summary value, so each point is the freshest HRV
+  /// reading we have for that date_key.
+  private static func hrvTrend(
+    from byDate: [String: WhoopImportedDailyStore.DailySummary]
+  ) -> (points: [(dateKey: String, value: Double)], baseline: Double?) {
+    let points = byDate.values
+      .compactMap { summary -> (dateKey: String, value: Double)? in
+        guard let hrv = summary.hrvRmssdMs else { return nil }
+        return (summary.dateKey, hrv)
+      }
+      .sorted { $0.dateKey < $1.dateKey }
+      .suffix(14)
+    let baseline: Double? = {
+      let values = points.map(\.value)
+      guard !values.isEmpty else { return nil }
+      let sorted = values.sorted()
+      let n = sorted.count
+      return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+    }()
+    return (Array(points), baseline)
+  }
 }
 
 /// Strongly-typed view of the bridge response from `sleep.compute_reading`

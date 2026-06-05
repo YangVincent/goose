@@ -7,7 +7,9 @@ import Foundation
 struct SleepCoachDetailView: View {
   @ObservedObject private var dayStrain: DayStrainStore = .shared
   @ObservedObject private var sleepStore = SleepWindowStore.shared
-  @ObservedObject private var hrvStore = NightlyHRVStore.shared
+  // NightlyHRVStore was deleted in Stage 5b. Per-night onset/wake
+  // consistency is on hold until DailySummary carries
+  // sleep_readings start/end times.
 
   @AppStorage("goose.swift.sleepCoach.wakeHour") var wakeHour: Int = 7
   @AppStorage("goose.swift.sleepCoach.baselineHours") var baselineHours: Double = 8.0
@@ -110,7 +112,7 @@ struct SleepCoachDetailView: View {
           .font(.system(size: 10, weight: .heavy, design: .rounded))
           .tracking(2)
           .foregroundStyle(.white.opacity(0.55))
-        let nights = hrvStore.recentNights.suffix(7)
+        let nights: [(onset: Date, wake: Date)] = []
         if nights.count >= 3 {
           let onsetMins = nights.map { hour24Mins(of: $0.onset) }
           let wakeMins = nights.map { hour24Mins(of: $0.wake) }

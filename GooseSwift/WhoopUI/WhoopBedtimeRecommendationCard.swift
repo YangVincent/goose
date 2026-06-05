@@ -112,15 +112,14 @@ struct WhoopBedtimeRecommendationCard: View {
   }
 
   /// Accumulated sleep debt over the last 3 nights (capped at +1.5h to
-  /// avoid runaway recommendations).
+  /// avoid runaway recommendations). NightlyHRVStore + SleepWindowStore
+  /// were deleted; sleep debt now uses dailyStore.summary.sleepInBedMs
+  /// against an 8h need target.
   private func recentSleepDebt() -> Double {
-    let recent = NightlyHRVStore.shared.recentNights  // proxy: nights we have data for
-    _ = recent
-    // We don't have a per-night duration store yet; use the lastNight window
-    // as a single point. Better tracking lands when nightly windows persist.
-    guard let window = SleepWindowStore.shared.lastNight else { return 0 }
+    let summary = WhoopImportedDailyStore.shared.summary(for: Date())
+    guard let inBedMs = summary?.sleepInBedMs, inBedMs > 0 else { return 0 }
     let need = 8.0 * 3600
-    let actual = window.durationSeconds
+    let actual = Double(inBedMs) / 1000
     let deficit = max(0, need - actual) / 3600
     return min(1.5, deficit)
   }

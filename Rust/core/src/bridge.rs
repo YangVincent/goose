@@ -1040,75 +1040,6 @@ struct SleepFeatureScoreArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RecoveryFeatureScoreArgs {
-    database_path: String,
-    #[serde(default = "default_correlation_start")]
-    start: String,
-    #[serde(default = "default_correlation_end")]
-    end: String,
-    #[serde(default)]
-    hrv_start: Option<String>,
-    #[serde(default)]
-    hrv_end: Option<String>,
-    #[serde(default = "default_correlation_start")]
-    hrv_baseline_start: String,
-    #[serde(default = "default_correlation_end")]
-    hrv_baseline_end: String,
-    #[serde(default = "default_correlation_start")]
-    resting_start: String,
-    #[serde(default = "default_correlation_end")]
-    resting_end: String,
-    #[serde(default)]
-    sleep_start: Option<String>,
-    #[serde(default)]
-    sleep_end: Option<String>,
-    #[serde(default)]
-    prior_strain_start: Option<String>,
-    #[serde(default)]
-    prior_strain_end: Option<String>,
-    #[serde(default)]
-    min_owned_captures: Option<usize>,
-    #[serde(default)]
-    require_trusted_evidence: bool,
-    #[serde(default)]
-    resting_baseline_min_days: Option<usize>,
-    #[serde(default)]
-    hrv_min_rr_intervals_to_compute: Option<usize>,
-    #[serde(default)]
-    hrv_baseline_min_days: Option<usize>,
-    #[serde(default)]
-    sleep_need_minutes: Option<f64>,
-    #[serde(default)]
-    low_motion_threshold_0_to_1: Option<f64>,
-    #[serde(default)]
-    disturbance_motion_threshold_0_to_1: Option<f64>,
-    #[serde(default)]
-    target_midpoint_minutes_since_midnight: Option<f64>,
-    #[serde(default)]
-    prior_strain_resting_baseline_min_days: Option<usize>,
-    #[serde(default)]
-    prior_strain_max_hr_bpm: Option<f64>,
-    #[serde(default)]
-    respiratory_rate_rpm: Option<f64>,
-    #[serde(default)]
-    respiratory_rate_baseline_rpm: Option<f64>,
-    #[serde(default)]
-    skin_temp_delta_c: Option<f64>,
-    #[serde(default)]
-    provided_vitals_source: Option<String>,
-    #[serde(default)]
-    provided_vitals_provenance_json: Option<String>,
-    #[serde(default)]
-    persist_algorithm_run: bool,
-    #[serde(default)]
-    algorithm_run_id: Option<String>,
-    #[serde(default)]
-    algorithm_id: Option<String>,
-    #[serde(default)]
-    algorithm_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct StressFeatureScoreArgs {
     database_path: String,
     #[serde(default = "default_correlation_start")]
@@ -2157,12 +2088,6 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(sleep_feature_score_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
-        "metrics.recovery_score_from_features" => {
-            request_args::<RecoveryFeatureScoreArgs>(&request)
-                .and_then(recovery_feature_score_bridge)
-                .map(|value| bridge_ok(&request.request_id, value))
-                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
-        }
         "metrics.strain_score_from_features" => request_args::<StrainFeatureScoreArgs>(&request)
             .and_then(strain_feature_score_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2555,6 +2480,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "recovery.get_reading" => request_args::<RecoveryGetReadingArgs>(&request)
             .and_then(recovery_get_reading_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "recovery.latest_reading" => request_args::<RecoveryLatestReadingArgs>(&request)
+            .and_then(recovery_latest_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.compute_reading" => request_args::<SleepComputeReadingArgs>(&request)
@@ -5261,88 +5190,6 @@ fn sleep_feature_score_bridge(args: SleepFeatureScoreArgs) -> GooseResult<serde_
             args.persist_algorithm_run,
             args.algorithm_run_id.as_deref(),
             "packet-derived-sleep",
-            report.score_result.as_ref(),
-        )?;
-    }
-    Ok(value)
-}
-
-fn recovery_feature_score_bridge(args: RecoveryFeatureScoreArgs) -> GooseResult<serde_json::Value> {
-    validate_requested_primary_algorithm(
-        "recovery",
-        args.algorithm_id.as_deref(),
-        args.algorithm_version.as_deref(),
-        GOOSE_RECOVERY_V0_ID,
-        GOOSE_RECOVERY_V0_VERSION,
-    )?;
-    let store = open_bridge_store(&args.database_path)?;
-    let hrv_start = args.hrv_start.as_deref().unwrap_or(&args.start);
-    let hrv_end = args.hrv_end.as_deref().unwrap_or(&args.end);
-    let sleep_start = args.sleep_start.as_deref().unwrap_or(&args.start);
-    let sleep_end = args.sleep_end.as_deref().unwrap_or(&args.end);
-    let prior_strain_start = args.prior_strain_start.as_deref().unwrap_or(&args.start);
-    let prior_strain_end = args.prior_strain_end.as_deref().unwrap_or(&args.end);
-    let report = run_recovery_feature_score_report_for_store(
-        &store,
-        &args.database_path,
-        &args.start,
-        &args.end,
-        hrv_start,
-        hrv_end,
-        &args.hrv_baseline_start,
-        &args.hrv_baseline_end,
-        &args.resting_start,
-        &args.resting_end,
-        sleep_start,
-        sleep_end,
-        prior_strain_start,
-        prior_strain_end,
-        RecoveryFeatureScoreOptions {
-            min_owned_captures_per_summary: args
-                .min_owned_captures
-                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
-            require_trusted_evidence: args.require_trusted_evidence,
-            resting_baseline_min_days: args.resting_baseline_min_days.unwrap_or(3),
-            hrv_min_rr_intervals_to_compute: args.hrv_min_rr_intervals_to_compute.unwrap_or(2),
-            hrv_baseline_min_days: args.hrv_baseline_min_days.unwrap_or(3),
-            sleep_need_minutes: args.sleep_need_minutes.unwrap_or(480.0),
-            low_motion_threshold_0_to_1: args.low_motion_threshold_0_to_1.unwrap_or(0.05),
-            disturbance_motion_threshold_0_to_1: args
-                .disturbance_motion_threshold_0_to_1
-                .unwrap_or(0.20),
-            target_midpoint_minutes_since_midnight: args
-                .target_midpoint_minutes_since_midnight
-                .unwrap_or(180.0),
-            prior_strain_resting_baseline_min_days: args
-                .prior_strain_resting_baseline_min_days
-                .unwrap_or(3),
-            prior_strain_max_hr_bpm: args.prior_strain_max_hr_bpm,
-            respiratory_rate_rpm: args.respiratory_rate_rpm,
-            respiratory_rate_baseline_rpm: args.respiratory_rate_baseline_rpm,
-            skin_temp_delta_c: args.skin_temp_delta_c,
-            provided_vitals_source: args.provided_vitals_source,
-            provided_vitals_provenance_json: args.provided_vitals_provenance_json,
-        },
-    )?;
-    let mut value = serde_json::to_value(&report).map_err(|error| {
-        GooseError::message(format!(
-            "cannot serialize recovery feature score report: {error}"
-        ))
-    })?;
-    if args.persist_algorithm_run && !report.pass {
-        value["persisted_algorithm_run"] = json!({
-            "persist_requested": true,
-            "inserted": false,
-            "blocked_reason": "report_not_passed",
-            "issues": &report.issues,
-        });
-    } else {
-        maybe_persist_algorithm_run(
-            &store,
-            &mut value,
-            args.persist_algorithm_run,
-            args.algorithm_run_id.as_deref(),
-            "packet-derived-recovery",
             report.score_result.as_ref(),
         )?;
     }
@@ -8093,6 +7940,15 @@ struct RecoveryGetReadingArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct RecoveryLatestReadingArgs {
+    database_path: String,
+    /// Optional cap on the rolling daily history returned alongside the
+    /// latest row. Used to populate the recovery trend chart.
+    #[serde(default)]
+    history_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SwiftCacheRangeLimitArgs {
     database_path: String,
     start_time_unix_ms: i64,
@@ -8524,6 +8380,61 @@ fn recovery_get_reading_bridge(args: RecoveryGetReadingArgs) -> GooseResult<serd
     let store = open_bridge_store(&args.database_path)?;
     let recovery = store.recovery_reading_for_session(&args.session_id)?;
     serde_json::to_value(recovery).map_err(|error| GooseError::message(error.to_string()))
+}
+
+/// Read the most-recent `recovery_readings` row plus a trailing N-day
+/// daily history. Returned in the legacy `metrics.recovery_score_from_features`
+/// shape so the iOS HealthDataStore snapshot/trend paths keep working
+/// after Path A was deleted — score is at `score_result.output.score_0_to_100`,
+/// trend history is at `daily[].score_0_to_100`.
+fn recovery_latest_reading_bridge(
+    args: RecoveryLatestReadingArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let history_days = args.history_days.unwrap_or(30);
+    let latest = store.latest_recovery_reading()?;
+    let history = store.recovery_reading_history(history_days)?;
+
+    let score_result = if let Some(reading) = &latest {
+        let components: Vec<serde_json::Value> = reading
+            .components
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "name": c.name,
+                    "score_0_to_100": c.score_0_to_100,
+                    "weight": c.weight,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "output": {
+                "algorithm_id": reading.algorithm_id,
+                "algorithm_version": reading.algorithm_version,
+                "score_0_to_100": reading.recovery_score,
+                "components": components,
+            }
+        })
+    } else {
+        serde_json::json!({ "output": serde_json::Value::Null })
+    };
+
+    let daily: Vec<serde_json::Value> = history
+        .iter()
+        .map(|h| {
+            serde_json::json!({
+                "date_key": h.date_key,
+                "score_0_to_100": h.recovery_score,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "score_result": score_result,
+        "daily": daily,
+        "session_id": latest.as_ref().map(|r| r.session_id.clone()),
+        "date_key": latest.as_ref().map(|r| r.date_key.clone()),
+    }))
 }
 
 fn swift_caches_list_sleep_audio_events_bridge(

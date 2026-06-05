@@ -1,28 +1,24 @@
 //! Recovery reading: turn one [`SleepReading`] into a 0-100 recovery
-//! score using the same `goose_recovery_v0` formula the packet-driven
-//! daily pipeline uses, but sourced from the sleep window directly so we
-//! can compute the moment a sleep session ends — no waiting for the
-//! daily rollup pipeline.
+//! score by delegating to [`metrics::goose_recovery_v0`] — the single
+//! source of truth for the formula. This module is the input gatherer:
+//! it pulls HRV / RHR from the sleep window, 28-day baselines from the
+//! WHOOP-imported daily summary, and yesterday's strain, then hands
+//! everything to `goose_recovery_v0` and reshapes the result for SQLite
+//! persistence + the iOS UI.
 //!
-//! Components and weights (mirror `metrics::goose_recovery_v0`):
-//!   - hrv         35%   clamp(70 + (rmssd/baseline - 1) * 100)
-//!   - rhr         20%   clamp(70 + (baseline - rhr) * 5)
-//!   - sleep       15%   sleep_reading.sleep_score, passed through
-//!   - respiratory 10%   clamp(100 - |rr - rr_baseline| * 20)
-//!   - temperature 10%   clamp(100 - |skin_temp_delta_c| * 50)
-//!   - prior_strain 10%  clamp(100 - prior_strain/21 * 60)
-//!
-//! Baselines come from the 28-day rolling median of
-//! `imported_daily_summary`. Prior strain is yesterday's `strain_score`
-//! (defaults to 0 — a rest day — when missing). Respiratory and skin
-//! temperature aren't computed locally yet so they're neutralized to
-//! baseline (full credit, 100 each); when those land we drop them in
-//! without changing the formula.
+//! Respiratory rate and skin temperature aren't computed locally yet,
+//! so they're synthesized at baseline (full credit, 100 each). When
+//! local estimators land we replace the synthesized values with real
+//! ones and the formula doesn't move.
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::{GooseError, GooseResult, sleep_reading::SleepReading};
+use crate::{
+    GooseError, GooseResult,
+    metrics::{RecoveryInput, goose_recovery_v0},
+    sleep_reading::SleepReading,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RecoveryReadingOptions {
@@ -82,13 +78,6 @@ pub struct RecoveryReading {
     pub prior_strain_0_to_21: f64,
     pub baseline_nights_used: i64,
     pub quality_flags: Vec<String>,
-}
-
-pub const RECOVERY_READING_ALGORITHM_ID: &str = "goose.recovery.from_sleep_reading.v0";
-pub const RECOVERY_READING_ALGORITHM_VERSION: &str = "0.1.0";
-
-fn clamp_0_100(v: f64) -> f64 {
-    v.max(0.0).min(100.0)
 }
 
 /// 10th-percentile BPM across the sleep window — same convention WHOOP
@@ -202,92 +191,80 @@ pub fn compute_recovery_from_sleep_reading(
     let rhr = resting_hr_from_window(conn, sleep_reading)?;
     let hrv = sleep_reading.hrv_mean_rmssd_ms;
 
-    let mut quality_flags = Vec::new();
-    if baseline_nights == 0 {
-        quality_flags.push("baseline_fallback".to_string());
-    }
-    if hrv == 0.0 {
-        quality_flags.push("hrv_missing".to_string());
-    }
-    if sleep_reading.sleep_score < 60.0 {
-        quality_flags.push("low_sleep_score".to_string());
-    }
-    if prior_strain > 14.0 {
-        quality_flags.push("high_prior_strain".to_string());
-    }
-
-    // Respiratory rate + skin temp delta aren't computed locally yet;
-    // assume "at baseline" (full credit). When those land we plumb them
-    // in here and the math doesn't change.
+    // Respiratory + skin temp aren't computed locally yet; synthesize
+    // "at baseline" (full credit). When local estimators land we drop
+    // them in here without changing the formula.
     let respiratory_rate = options.fallback_respiratory_rate_rpm;
     let respiratory_baseline = options.fallback_respiratory_rate_rpm;
     let skin_temp_delta: f64 = 0.0;
-    quality_flags.push("respiratory_temperature_neutralized".to_string());
 
-    let hrv_score = if hrv_baseline > 0.0 {
-        clamp_0_100(70.0 + (hrv / hrv_baseline - 1.0) * 100.0)
-    } else {
-        0.0
+    let input = RecoveryInput {
+        start_time: sleep_reading.start_time_unix_ms.to_string(),
+        end_time: sleep_reading.end_time_unix_ms.to_string(),
+        hrv_rmssd_ms: hrv,
+        hrv_baseline_rmssd_ms: hrv_baseline,
+        resting_hr_bpm: rhr,
+        resting_hr_baseline_bpm: rhr_baseline,
+        respiratory_rate_rpm: respiratory_rate,
+        respiratory_rate_baseline_rpm: respiratory_baseline,
+        skin_temp_delta_c: skin_temp_delta,
+        sleep_score_0_to_100: sleep_reading.sleep_score,
+        prior_strain_0_to_21: prior_strain,
+        input_ids: Vec::new(),
     };
-    let rhr_score = clamp_0_100(70.0 + (rhr_baseline - rhr) * 5.0);
-    let respiratory_score =
-        clamp_0_100(100.0 - (respiratory_rate - respiratory_baseline).abs() * 20.0);
-    let temperature_score = clamp_0_100(100.0 - skin_temp_delta.abs() * 50.0);
-    let prior_strain_score = clamp_0_100(100.0 - prior_strain / 21.0 * 60.0);
-    let sleep_score = sleep_reading.sleep_score;
+    let run = goose_recovery_v0(&input);
+    let output = run.output.ok_or_else(|| {
+        GooseError::message(format!(
+            "goose_recovery_v0 returned no output: errors={:?}",
+            run.errors
+        ))
+    })?;
 
-    let components = vec![
-        RecoveryComponent {
-            name: "hrv".to_string(),
-            score_0_to_100: round1(hrv_score),
-            weight: 0.35,
-        },
-        RecoveryComponent {
-            name: "rhr".to_string(),
-            score_0_to_100: round1(rhr_score),
-            weight: 0.20,
-        },
-        RecoveryComponent {
-            name: "sleep".to_string(),
-            score_0_to_100: round1(sleep_score),
-            weight: 0.15,
-        },
-        RecoveryComponent {
-            name: "respiratory".to_string(),
-            score_0_to_100: round1(respiratory_score),
-            weight: 0.10,
-        },
-        RecoveryComponent {
-            name: "temperature".to_string(),
-            score_0_to_100: round1(temperature_score),
-            weight: 0.10,
-        },
-        RecoveryComponent {
-            name: "prior_strain".to_string(),
-            score_0_to_100: round1(prior_strain_score),
-            weight: 0.10,
-        },
-    ];
-    let recovery_score: f64 = components
+    // Flatten goose_recovery_v0's components vec into named sub-scores
+    // for SQLite columns; the full components list is preserved in the
+    // JSON blob below.
+    let score_for = |name: &str| -> f64 {
+        output
+            .components
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.score_0_to_100)
+            .unwrap_or(0.0)
+    };
+
+    let mut quality_flags = run.quality_flags.clone();
+    if baseline_nights == 0 {
+        quality_flags.push("baseline_fallback".to_string());
+    }
+    quality_flags.push("respiratory_temperature_neutralized".to_string());
+    quality_flags.sort();
+    quality_flags.dedup();
+
+    let components = output
+        .components
         .iter()
-        .map(|c| c.score_0_to_100 * c.weight)
-        .sum();
+        .map(|c| RecoveryComponent {
+            name: c.name.clone(),
+            score_0_to_100: round1(c.score_0_to_100),
+            weight: c.weight,
+        })
+        .collect();
 
     Ok(RecoveryReading {
         schema: "goose.recovery-reading.v0".to_string(),
         session_id,
         date_key,
-        algorithm_id: RECOVERY_READING_ALGORITHM_ID.to_string(),
-        algorithm_version: RECOVERY_READING_ALGORITHM_VERSION.to_string(),
+        algorithm_id: output.algorithm_id.clone(),
+        algorithm_version: output.algorithm_version.clone(),
         start_time_unix_ms: sleep_reading.start_time_unix_ms,
         end_time_unix_ms: sleep_reading.end_time_unix_ms,
-        recovery_score: round1(recovery_score),
-        hrv_score: round1(hrv_score),
-        rhr_score: round1(rhr_score),
-        sleep_score: round1(sleep_score),
-        respiratory_score: round1(respiratory_score),
-        temperature_score: round1(temperature_score),
-        prior_strain_score: round1(prior_strain_score),
+        recovery_score: round1(output.score_0_to_100),
+        hrv_score: round1(score_for("hrv")),
+        rhr_score: round1(score_for("rhr")),
+        sleep_score: round1(score_for("sleep")),
+        respiratory_score: round1(score_for("respiratory")),
+        temperature_score: round1(score_for("temperature")),
+        prior_strain_score: round1(score_for("prior_strain")),
         components,
         hrv_rmssd_ms: round1(hrv),
         hrv_baseline_rmssd_ms: round1(hrv_baseline),

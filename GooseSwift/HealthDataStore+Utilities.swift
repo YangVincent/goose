@@ -129,29 +129,6 @@ extension HealthDataStore {
     )
   }
 
-  func recoveryScoreBridgeArgs() -> [String: Any] {
-    [
-      "hrv_start": "0000",
-      "hrv_end": "9999",
-      "hrv_baseline_start": "0000",
-      "hrv_baseline_end": "9999",
-      "resting_start": "0000",
-      "resting_end": "9999",
-      "sleep_start": "0000",
-      "sleep_end": "9999",
-      "prior_strain_start": "0000",
-      "prior_strain_end": "9999",
-      "resting_baseline_min_days": 3,
-      "hrv_min_rr_intervals_to_compute": 2,
-      "hrv_baseline_min_days": 3,
-      "sleep_need_minutes": 480.0,
-      "low_motion_threshold_0_to_1": 0.05,
-      "disturbance_motion_threshold_0_to_1": 0.20,
-      "target_midpoint_minutes_since_midnight": 180.0,
-      "prior_strain_resting_baseline_min_days": 3,
-    ]
-  }
-
   static func shortError(_ error: Error) -> String {
     let text = String(describing: error)
     return text.count > 96 ? "\(text.prefix(96))..." : text

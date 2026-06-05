@@ -17,9 +17,13 @@ extension HealthDataStore {
           "resting_baseline_min_days": 3,
         ]) { _, new in new }
       )
+      // Recovery now reads the on-disk recovery_readings table written
+      // by sleep.compute_reading; no packet-pipeline orchestration. The
+      // legacy `score_result.output.score_0_to_100` + `daily[]` shape is
+      // preserved so existing UI/coach consumers don't need to change.
       packetScoreReports["recovery"] = try bridge.request(
-        method: "metrics.recovery_score_from_features",
-        args: baseArgs.merging(recoveryScoreBridgeArgs()) { _, new in new }
+        method: "recovery.latest_reading",
+        args: ["database_path": databasePath, "history_days": 30]
       )
       packetScoreReports["stress"] = try bridge.request(
         method: "metrics.stress_score_from_features",

@@ -1469,6 +1469,53 @@ impl GooseStore {
         }
     }
 
+    /// Most-recent recovery_readings row by `end_time_unix_ms`, or None
+    /// when the table is empty. Used by `recovery.latest_reading` to
+    /// populate the iOS Recovery card.
+    pub fn latest_recovery_reading(
+        &self,
+    ) -> GooseResult<Option<crate::recovery_reading::RecoveryReading>> {
+        use rusqlite::OptionalExtension;
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT reading_json FROM recovery_readings \
+                 ORDER BY end_time_unix_ms DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match raw {
+            None => Ok(None),
+            Some(text) => serde_json::from_str(&text)
+                .map(Some)
+                .map_err(|error| GooseError::message(error.to_string())),
+        }
+    }
+
+    /// Trailing N-day rolling history of recovery_readings: one row per
+    /// date_key, most-recent first. Drives the iOS recovery trend chart
+    /// (previously fed by `metrics.recovery_score_from_features.daily`).
+    pub fn recovery_reading_history(
+        &self,
+        days: i64,
+    ) -> GooseResult<Vec<crate::recovery_reading::RecoveryReading>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT reading_json FROM recovery_readings \
+             ORDER BY end_time_unix_ms DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![days], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let text = row?;
+            let parsed: crate::recovery_reading::RecoveryReading =
+                serde_json::from_str(&text)
+                    .map_err(|error| GooseError::message(error.to_string()))?;
+            out.push(parsed);
+        }
+        Ok(out)
+    }
+
     /// One row per STRAP_CONDITION_REPORT (~every 10 minutes) covering the
     /// requested window. Callers use this to derive worn intervals: each
     /// pair of consecutive same-value rows defines a confirmed worn/off

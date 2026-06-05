@@ -1400,7 +1400,7 @@ impl GooseStore {
         self.conn.execute(
             r#"
             INSERT INTO recovery_readings (
-                session_id, date_key, algorithm_id, algorithm_version,
+                session_id, date_key, source, algorithm_id, algorithm_version,
                 start_time_unix_ms, end_time_unix_ms,
                 recovery_score, hrv_score, rhr_score, sleep_score,
                 respiratory_score, temperature_score, prior_strain_score,
@@ -1411,10 +1411,11 @@ impl GooseStore {
                 baseline_nights_used, reading_json
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
+                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
             )
             ON CONFLICT(session_id) DO UPDATE SET
                 date_key = excluded.date_key,
+                source = excluded.source,
                 algorithm_id = excluded.algorithm_id,
                 algorithm_version = excluded.algorithm_version,
                 start_time_unix_ms = excluded.start_time_unix_ms,
@@ -1441,6 +1442,7 @@ impl GooseStore {
             params![
                 reading.session_id,
                 reading.date_key,
+                reading.source,
                 reading.algorithm_id,
                 reading.algorithm_version,
                 reading.start_time_unix_ms,
@@ -1519,7 +1521,9 @@ impl GooseStore {
     pub fn upsert_daily_strain_reading(
         &self,
         date_key: &str,
+        source: &str,
         strain_score: f64,
+        strain_kilojoules: f64,
         background_strain: f64,
         background_effective_kj: f64,
         workout_count: i64,
@@ -1529,16 +1533,21 @@ impl GooseStore {
         last_sample_at_unix_ms: Option<i64>,
         reading_json: &str,
     ) -> GooseResult<()> {
+        // Conflict rule: local always wins. If a goose.local row exists
+        // for this date_key, a whoop.cloud upsert no-ops. Otherwise the
+        // upsert lands and wins (last-writer for same source).
         self.conn.execute(
             r#"
             INSERT INTO daily_strain_readings (
-                date_key, strain_score, background_strain,
-                background_effective_kj, workout_count,
-                workout_effective_kj, workout_strain_sum,
+                date_key, source, strain_score, strain_kilojoules,
+                background_strain, background_effective_kj,
+                workout_count, workout_effective_kj, workout_strain_sum,
                 sample_count, last_sample_at_unix_ms, reading_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(date_key) DO UPDATE SET
+                source = excluded.source,
                 strain_score = excluded.strain_score,
+                strain_kilojoules = excluded.strain_kilojoules,
                 background_strain = excluded.background_strain,
                 background_effective_kj = excluded.background_effective_kj,
                 workout_count = excluded.workout_count,
@@ -1548,10 +1557,14 @@ impl GooseStore {
                 last_sample_at_unix_ms = excluded.last_sample_at_unix_ms,
                 reading_json = excluded.reading_json,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE NOT (daily_strain_readings.source = 'goose.local'
+                           AND excluded.source = 'whoop.cloud')
             "#,
             params![
                 date_key,
+                source,
                 strain_score,
+                strain_kilojoules,
                 background_strain,
                 background_effective_kj,
                 workout_count,

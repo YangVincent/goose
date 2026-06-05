@@ -7973,6 +7973,14 @@ struct StrainUpsertReadingArgs {
     sample_count: i64,
     #[serde(default)]
     last_sample_at_unix_ms: Option<i64>,
+    /// Defaults to `goose.local` when the iOS DayStrainStore writes.
+    /// WHOOP converter passes `whoop.cloud`.
+    #[serde(default)]
+    source: Option<String>,
+    /// kJ-equivalent load. iOS DayStrainStore doesn't currently send
+    /// this; WHOOP imports do via the `strain_kilojoules` summary field.
+    #[serde(default)]
+    strain_kilojoules: Option<f64>,
     /// Full DayStrain payload as a JSON string — kept opaque so the
     /// Swift caller decides what to surface; the typed columns above
     /// power the trend / debug queries.
@@ -8430,9 +8438,16 @@ fn strain_upsert_reading_bridge(
     args: StrainUpsertReadingArgs,
 ) -> GooseResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
+    // iOS DayStrainStore.finalizePastDaysIfNeeded callers don't pass
+    // source / kj — default them; the WHOOP converter passes them
+    // explicitly.
+    let source = args.source.as_deref().unwrap_or("goose.local");
+    let strain_kj = args.strain_kilojoules.unwrap_or(0.0);
     store.upsert_daily_strain_reading(
         &args.date_key,
+        source,
         args.strain_score,
+        strain_kj,
         args.background_strain,
         args.background_effective_kj,
         args.workout_count,

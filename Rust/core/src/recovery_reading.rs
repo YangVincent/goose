@@ -54,6 +54,11 @@ pub struct RecoveryReading {
     pub schema: String,
     pub session_id: String,
     pub date_key: String,
+    /// `goose.local` for readings driven by an iOS-initiated
+    /// SleepReading; `whoop.cloud` for ones lifted from
+    /// `imported_daily_summary.recovery_score`.
+    #[serde(default = "default_recovery_source_local")]
+    pub source: String,
     pub algorithm_id: String,
     pub algorithm_version: String,
     pub start_time_unix_ms: i64,
@@ -254,6 +259,7 @@ pub fn compute_recovery_from_sleep_reading(
         schema: "goose.recovery-reading.v0".to_string(),
         session_id,
         date_key,
+        source: "goose.local".to_string(),
         algorithm_id: output.algorithm_id.clone(),
         algorithm_version: output.algorithm_version.clone(),
         start_time_unix_ms: sleep_reading.start_time_unix_ms,
@@ -277,6 +283,10 @@ pub fn compute_recovery_from_sleep_reading(
         baseline_nights_used: baseline_nights,
         quality_flags,
     })
+}
+
+fn default_recovery_source_local() -> String {
+    "goose.local".to_string()
 }
 
 fn round1(v: f64) -> f64 {

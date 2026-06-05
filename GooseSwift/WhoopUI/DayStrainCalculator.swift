@@ -149,6 +149,17 @@ enum DayStrainCalculator {
   static let walkingFormula = StrainFormula(
     name: "walking", scale: 5.5, k: 80, alpha: 7.5, medianFitError: 0.04
   )
+  /// Default for background (non-workout) HR — i.e. just being alive,
+  /// at a desk, walking around the kitchen, watching TV. Walking is
+  /// the WRONG model for this: α=7.5 amplifies every small HRR bump
+  /// (60 → 70 BPM near RHR adds ~60% to the per-second kJ), so 16h
+  /// awake at typical desk HR runs strain to 10+ on a true rest day.
+  /// Sedentary uses a much gentler curve: low α, high k so the log
+  /// curve barely lifts until kJ accumulates significantly. Tuned so
+  /// a normal desk day lands at ~3-5 strain, not 12+.
+  static let sedentaryFormula = StrainFormula(
+    name: "sedentary", scale: 4.0, k: 2000, alpha: 0.5, medianFitError: 0
+  )
   /// Fit on 3 generic "activity" entries, median error 0.30.
   static let activityFormula = StrainFormula(
     name: "activity", scale: 4.0, k: 30, alpha: 1.5, medianFitError: 0.30
@@ -322,7 +333,7 @@ final class DayStrainStore: ObservableObject {
       return !inWorkout && !inSleep
     }
     let offWristFiltered = Self.filterOffWrist(nonWorkoutSamples, offWristWindows: offWristWindows)
-    let bgFormula = DayStrainCalculator.walkingFormula
+    let bgFormula = DayStrainCalculator.sedentaryFormula
     var bgEffectiveKJ: Double = 0
     var lastTime: Date?
     for sample in offWristFiltered.sorted(by: { $0.capturedAt < $1.capturedAt }) {

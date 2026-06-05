@@ -1260,14 +1260,19 @@ impl GooseStore {
             .ok_or_else(|| GooseError::message("sleep reading session_id is required"))?;
         let reading_json = serde_json::to_string(reading)
             .map_err(|error| GooseError::message(error.to_string()))?;
+        // date_key is the local-time yyyy-MM-dd of the wake side, derived
+        // by SQLite's strftime so we don't need a tz crate. It indexes
+        // the table for per-day lookups without a session_id roundtrip.
         self.conn.execute(
             r#"
             INSERT INTO sleep_readings (
-                session_id, start_time_unix_ms, end_time_unix_ms,
+                session_id, source, date_key,
+                start_time_unix_ms, end_time_unix_ms,
                 time_in_bed_minutes, total_sleep_minutes, deep_minutes,
-                light_minutes, awake_minutes, efficiency,
+                light_minutes, awake_minutes, rem_minutes, efficiency,
                 deep_share_of_sleep, awake_share_of_bed,
                 onset_latency_minutes, wake_after_sleep_onset_minutes,
+                cycle_count, disturbance_count, sleep_need_ms,
                 hr_mean_bpm, hr_min_bpm, hr_max_bpm,
                 hrv_mean_rmssd_ms, hrv_sample_count,
                 movement_total_intensity, movement_peak_minute,
@@ -1277,11 +1282,15 @@ impl GooseStore {
                 resting_bpm_used, hrv_baseline_ms_used, need_hours,
                 reading_json
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
-                ?25, ?26, ?27, ?28, ?29, ?30, ?31
+                ?1, ?2,
+                strftime('%Y-%m-%d', ?3 / 1000.0, 'unixepoch', 'localtime'),
+                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26,
+                ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
             )
             ON CONFLICT(session_id) DO UPDATE SET
+                source = excluded.source,
+                date_key = excluded.date_key,
                 start_time_unix_ms = excluded.start_time_unix_ms,
                 end_time_unix_ms = excluded.end_time_unix_ms,
                 time_in_bed_minutes = excluded.time_in_bed_minutes,
@@ -1289,11 +1298,15 @@ impl GooseStore {
                 deep_minutes = excluded.deep_minutes,
                 light_minutes = excluded.light_minutes,
                 awake_minutes = excluded.awake_minutes,
+                rem_minutes = excluded.rem_minutes,
                 efficiency = excluded.efficiency,
                 deep_share_of_sleep = excluded.deep_share_of_sleep,
                 awake_share_of_bed = excluded.awake_share_of_bed,
                 onset_latency_minutes = excluded.onset_latency_minutes,
                 wake_after_sleep_onset_minutes = excluded.wake_after_sleep_onset_minutes,
+                cycle_count = excluded.cycle_count,
+                disturbance_count = excluded.disturbance_count,
+                sleep_need_ms = excluded.sleep_need_ms,
                 hr_mean_bpm = excluded.hr_mean_bpm,
                 hr_min_bpm = excluded.hr_min_bpm,
                 hr_max_bpm = excluded.hr_max_bpm,
@@ -1315,37 +1328,43 @@ impl GooseStore {
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
             "#,
             params![
-                session_id,
-                reading.start_time_unix_ms,
-                reading.end_time_unix_ms,
-                reading.time_in_bed_minutes,
-                reading.total_sleep_minutes,
-                reading.deep_minutes,
-                reading.light_minutes,
-                reading.awake_minutes,
-                reading.efficiency,
-                reading.deep_share_of_sleep,
-                reading.awake_share_of_bed,
-                reading.onset_latency_minutes,
-                reading.wake_after_sleep_onset_minutes,
-                reading.hr_mean_bpm,
-                reading.hr_min_bpm,
-                reading.hr_max_bpm,
-                reading.hrv_mean_rmssd_ms,
-                reading.hrv_sample_count,
-                reading.movement_total_intensity,
-                reading.movement_peak_minute,
-                reading.movement_burst_minutes,
-                reading.duration_score,
-                reading.efficiency_score,
-                reading.depth_score,
-                reading.hrv_score,
-                reading.restfulness_score,
-                reading.sleep_score,
-                reading.resting_bpm_used,
-                reading.hrv_baseline_ms_used,
-                reading.need_hours,
-                reading_json,
+                session_id,                                  // ?1
+                reading.source,                              // ?2
+                reading.end_time_unix_ms,                    // ?3 → date_key via strftime
+                reading.start_time_unix_ms,                  // ?4
+                reading.end_time_unix_ms,                    // ?5
+                reading.time_in_bed_minutes,                 // ?6
+                reading.total_sleep_minutes,                 // ?7
+                reading.deep_minutes,                        // ?8
+                reading.light_minutes,                       // ?9
+                reading.awake_minutes,                       // ?10
+                reading.rem_minutes,                         // ?11
+                reading.efficiency,                          // ?12
+                reading.deep_share_of_sleep,                 // ?13
+                reading.awake_share_of_bed,                  // ?14
+                reading.onset_latency_minutes,               // ?15
+                reading.wake_after_sleep_onset_minutes,      // ?16
+                reading.cycle_count,                         // ?17
+                reading.disturbance_count,                   // ?18
+                reading.sleep_need_ms,                       // ?19
+                reading.hr_mean_bpm,                         // ?20
+                reading.hr_min_bpm,                          // ?21
+                reading.hr_max_bpm,                          // ?22
+                reading.hrv_mean_rmssd_ms,                   // ?23
+                reading.hrv_sample_count,                    // ?24
+                reading.movement_total_intensity,            // ?25
+                reading.movement_peak_minute,                // ?26
+                reading.movement_burst_minutes,              // ?27
+                reading.duration_score,                      // ?28
+                reading.efficiency_score,                    // ?29
+                reading.depth_score,                         // ?30
+                reading.hrv_score,                           // ?31
+                reading.restfulness_score,                   // ?32
+                reading.sleep_score,                         // ?33
+                reading.resting_bpm_used,                    // ?34
+                reading.hrv_baseline_ms_used,                // ?35
+                reading.need_hours,                          // ?36
+                reading_json,                                // ?37
             ],
         )?;
         Ok(())

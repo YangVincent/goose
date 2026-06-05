@@ -50,6 +50,17 @@ impl Default for SleepReadingOptions {
 pub struct SleepReading {
     pub schema: String,
     pub session_id: Option<String>,
+    /// `goose.local` for readings computed by [`compute_sleep_reading`];
+    /// `whoop.cloud` for ones lifted from `imported_daily_summary` +
+    /// `external_sleep_sessions` via the WHOOP-to-typed converters.
+    /// Lets the UI tag the source without changing column shape.
+    #[serde(default = "default_source_local")]
+    pub source: String,
+    /// Local date_key (yyyy-MM-dd) of the wake day, derived from
+    /// `end_time_unix_ms`. Indexed; lets per-day lookups skip
+    /// session_id roundtrips.
+    #[serde(default)]
+    pub date_key: String,
     pub start_time_unix_ms: i64,
     pub end_time_unix_ms: i64,
     pub time_in_bed_minutes: i64,
@@ -57,11 +68,28 @@ pub struct SleepReading {
     pub deep_minutes: i64,
     pub light_minutes: i64,
     pub awake_minutes: i64,
+    /// REM minutes — WHOOP provides this directly; the local
+    /// algorithm doesn't classify REM yet so it's 0 for `goose.local`
+    /// rows until the K18/RR-driven REM classifier lands (TODO).
+    #[serde(default)]
+    pub rem_minutes: i64,
     pub efficiency: f64,
     pub deep_share_of_sleep: f64,
     pub awake_share_of_bed: f64,
     pub onset_latency_minutes: Option<i64>,
     pub wake_after_sleep_onset_minutes: i64,
+    /// Number of complete sleep cycles. WHOOP-only for now; 0 for
+    /// `goose.local` until the cycle detector lands (TODO).
+    #[serde(default)]
+    pub cycle_count: i64,
+    /// Discrete disturbances (long-enough awake spells mid-sleep).
+    /// WHOOP-only for now; 0 for `goose.local` (TODO).
+    #[serde(default)]
+    pub disturbance_count: i64,
+    /// WHOOP's adaptive sleep-need (baseline + debt + strain - nap).
+    /// `goose.local` rows compute this from `need_hours * 3600 * 1000`.
+    #[serde(default)]
+    pub sleep_need_ms: i64,
     pub hr_mean_bpm: Option<f64>,
     pub hr_min_bpm: Option<i64>,
     pub hr_max_bpm: Option<i64>,
@@ -79,6 +107,10 @@ pub struct SleepReading {
     pub resting_bpm_used: i64,
     pub hrv_baseline_ms_used: f64,
     pub need_hours: f64,
+}
+
+fn default_source_local() -> String {
+    "goose.local".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,6 +412,8 @@ pub fn compute_sleep_reading(
     Ok(SleepReading {
         schema: "goose.sleep-reading.v1".to_string(),
         session_id: session_id.map(str::to_string),
+        source: "goose.local".to_string(),
+        date_key: String::new(),
         start_time_unix_ms: start_ms,
         end_time_unix_ms: end_ms,
         time_in_bed_minutes: tib_min,
@@ -387,11 +421,15 @@ pub fn compute_sleep_reading(
         deep_minutes: deep_min,
         light_minutes: light_min,
         awake_minutes: awake_min,
+        rem_minutes: 0,
         efficiency: round3(efficiency),
         deep_share_of_sleep: round3(deep_share),
         awake_share_of_bed: round3(awake_share),
         onset_latency_minutes: onset_min,
         wake_after_sleep_onset_minutes: waso_min,
+        cycle_count: 0,
+        disturbance_count: 0,
+        sleep_need_ms: (options.need_hours * 3600.0 * 1000.0) as i64,
         hr_mean_bpm: hr_mean_bpm.map(round1),
         hr_min_bpm: hr_min,
         hr_max_bpm: hr_max,
@@ -411,6 +449,7 @@ pub fn compute_sleep_reading(
         need_hours: options.need_hours,
     })
 }
+
 
 fn round1(v: f64) -> f64 {
     (v * 10.0).round() / 10.0

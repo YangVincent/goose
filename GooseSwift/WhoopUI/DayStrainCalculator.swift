@@ -290,11 +290,22 @@ final class DayStrainStore: ObservableObject {
       $0.startedAt >= dayStart && $0.startedAt < dayEnd
     }
     let workoutWindows: [(Date, Date)] = workoutsForDay.map { ($0.startedAt, $0.endedAt) }
+    // Sleep windows for the day's "sleep day" (22:00 prior → 22:00 of
+    // referenceDate). HR samples inside these windows are bedtime HR —
+    // counting them as background strain treats 7 hours of low-HR sleep
+    // as 7 hours of walking, which spikes strain on a rest morning.
+    // Pull union from logged PastSessions overlapping the calendar day.
+    let sleepWindows: [(Date, Date)] = SleepSessionStore.shared.pastSessions
+      .filter { $0.endedAt > dayStart && $0.startedAt < dayEnd }
+      .map { (max($0.startedAt, dayStart), min($0.endedAt, dayEnd)) }
 
-    // 1. Non-workout HR samples (samples inside any workout window get
-    // attributed to that workout's formula instead).
+    // 1. Non-workout, non-sleep HR samples. Samples inside any workout
+    // window get attributed to that workout's formula; samples inside a
+    // sleep window are excluded entirely (bedtime HR isn't strain load).
     let nonWorkoutSamples = allSamples.filter { sample in
-      !workoutWindows.contains { sample.capturedAt >= $0.0 && sample.capturedAt <= $0.1 }
+      let inWorkout = workoutWindows.contains { sample.capturedAt >= $0.0 && sample.capturedAt <= $0.1 }
+      let inSleep = sleepWindows.contains { sample.capturedAt >= $0.0 && sample.capturedAt <= $0.1 }
+      return !inWorkout && !inSleep
     }
     let offWristFiltered = Self.filterOffWrist(nonWorkoutSamples, offWristWindows: offWristWindows)
     let bgFormula = DayStrainCalculator.walkingFormula

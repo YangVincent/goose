@@ -181,6 +181,55 @@ final class WhoopImportedDailyStore: ObservableObject {
           byKey[parsed.dateKey] = parsed
         }
       }
+      // Overlay recovery_readings on top of imported_daily_summary. Any
+      // date_key where we have a local-computed recovery score (Goose-
+      // initiated sleep session) takes precedence — that's what surfaces
+      // recovery dots on the date strip for days WHOOP never imported
+      // (the local-only nights and "today" before WHOOP syncs).
+      do {
+        let response = try await Task.detached(priority: .userInitiated) { [bridge] in
+          try bridge.request(method: "recovery.list_by_date_range", args: [
+            "database_path": databasePath,
+            "start_date_key": start,
+            "end_date_key": end,
+          ])
+        }.value
+        let rows = response["rows"] as? [[String: Any]] ?? []
+        for row in rows {
+          guard let dateKey = row["date_key"] as? String,
+                let score = (row["recovery_score"] as? Double)
+                  ?? (row["recovery_score"] as? NSNumber).map({ $0.doubleValue }) else {
+            continue
+          }
+          let existing = byKey[dateKey]
+          byKey[dateKey] = DailySummary(
+            dateKey: dateKey,
+            recoveryScore: score,
+            hrvRmssdMs: existing?.hrvRmssdMs,
+            restingHrBpm: existing?.restingHrBpm,
+            spo2Pct: existing?.spo2Pct,
+            skinTempC: existing?.skinTempC,
+            sleepPerformancePct: existing?.sleepPerformancePct,
+            sleepEfficiencyPct: existing?.sleepEfficiencyPct,
+            sleepInBedMs: existing?.sleepInBedMs,
+            sleepAwakeMs: existing?.sleepAwakeMs,
+            sleepLightMs: existing?.sleepLightMs,
+            sleepDeepMs: existing?.sleepDeepMs,
+            sleepRemMs: existing?.sleepRemMs,
+            sleepCycleCount: existing?.sleepCycleCount,
+            sleepDisturbanceCount: existing?.sleepDisturbanceCount,
+            sleepNeedBaselineMs: existing?.sleepNeedBaselineMs,
+            sleepNeedFromDebtMs: existing?.sleepNeedFromDebtMs,
+            sleepNeedFromStrainMs: existing?.sleepNeedFromStrainMs,
+            sleepNeedFromNapMs: existing?.sleepNeedFromNapMs,
+            strainScore: existing?.strainScore,
+            strainKilojoules: existing?.strainKilojoules
+          )
+        }
+      } catch {
+        // Recovery overlay failure isn't fatal; the imported summaries
+        // are still valid.
+      }
       self.byDate = byKey
       self.importedCount = byKey.count
     } catch {

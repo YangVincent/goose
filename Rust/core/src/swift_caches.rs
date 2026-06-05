@@ -405,6 +405,15 @@ pub struct RawPacketBodyRow {
 }
 
 /// One-shot recovery summary returned by
+/// One row per date_key returned by `recovery_readings_by_date_range`.
+/// Powers the date strip dots and other per-day recovery lookups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryDateRangeRow {
+    pub date_key: String,
+    pub recovery_score: f64,
+    pub source: String,
+}
+
 /// Per-table counts emitted by `whoop_migrate_to_typed_tables`. Sent
 /// back over the bridge to surface in the iOS migration UI / telemetry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1728,6 +1737,42 @@ impl GooseStore {
         )?;
         let rows = stmt.query_map(params![start_date, end_date], |row| {
             row.get::<_, String>(0)
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Per-date_key rows for the inclusive `[start, end]` range. When
+    /// both a `goose.local` and a `whoop.cloud` row exist for the same
+    /// date_key (post-WHOOP-migration), `goose.local` wins. Drives the
+    /// date strip dots and any per-day recovery lookup.
+    pub fn recovery_readings_by_date_range(
+        &self,
+        start_date_key: &str,
+        end_date_key: &str,
+    ) -> GooseResult<Vec<RecoveryDateRangeRow>> {
+        let mut stmt = self.conn.prepare(
+            "WITH ranked AS ( \
+               SELECT date_key, recovery_score, source, \
+                 ROW_NUMBER() OVER ( \
+                   PARTITION BY date_key \
+                   ORDER BY CASE WHEN source = 'goose.local' THEN 0 ELSE 1 END \
+                 ) AS rk \
+               FROM recovery_readings \
+               WHERE date_key BETWEEN ?1 AND ?2 \
+             ) \
+             SELECT date_key, recovery_score, source FROM ranked \
+             WHERE rk = 1 ORDER BY date_key ASC",
+        )?;
+        let rows = stmt.query_map(params![start_date_key, end_date_key], |row| {
+            Ok(RecoveryDateRangeRow {
+                date_key: row.get(0)?,
+                recovery_score: row.get(1)?,
+                source: row.get(2)?,
+            })
         })?;
         let mut out = Vec::new();
         for row in rows {

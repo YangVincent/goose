@@ -2486,6 +2486,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(recovery_latest_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "recovery.list_by_date_range" => request_args::<RecoveryListByDateRangeArgs>(&request)
+            .and_then(recovery_list_by_date_range_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "strain.upsert_reading" => request_args::<StrainUpsertReadingArgs>(&request)
             .and_then(strain_upsert_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -7965,6 +7969,14 @@ struct RecoveryLatestReadingArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct RecoveryListByDateRangeArgs {
+    database_path: String,
+    /// Inclusive yyyy-MM-dd bounds.
+    start_date_key: String,
+    end_date_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct StrainUpsertReadingArgs {
     database_path: String,
     date_key: String,
@@ -8441,6 +8453,19 @@ fn recovery_get_reading_bridge(args: RecoveryGetReadingArgs) -> GooseResult<serd
     let store = open_bridge_store(&args.database_path)?;
     let recovery = store.recovery_reading_for_session(&args.session_id)?;
     serde_json::to_value(recovery).map_err(|error| GooseError::message(error.to_string()))
+}
+
+/// List every recovery_readings row in [start_date_key, end_date_key].
+/// When more than one row covers the same date_key (goose.local +
+/// whoop.cloud both present after migration) we prefer the goose.local
+/// row. Drives the date strip dots and any per-day recovery lookup the
+/// UI needs without a session_id roundtrip.
+fn recovery_list_by_date_range_bridge(
+    args: RecoveryListByDateRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.recovery_readings_by_date_range(&args.start_date_key, &args.end_date_key)?;
+    Ok(serde_json::json!({ "rows": rows }))
 }
 
 fn strain_upsert_reading_bridge(

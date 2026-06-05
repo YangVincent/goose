@@ -1879,24 +1879,13 @@ impl GooseStore {
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (23);
             PRAGMA user_version = 23;
 
-            -- v24: source columns + WHOOP-shaped sleep fields. Lets
-            -- whoop.cloud rows live in the same typed tables as
-            -- goose.local computed rows, with `source` distinguishing.
-            -- Conflict semantics: local wins by session_id (UPSERT); WHOOP
-            -- only fills date_keys that the local path hasn't produced.
-            ALTER TABLE sleep_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local';
-            ALTER TABLE sleep_readings ADD COLUMN rem_minutes INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE sleep_readings ADD COLUMN cycle_count INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE sleep_readings ADD COLUMN disturbance_count INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE sleep_readings ADD COLUMN sleep_need_ms INTEGER NOT NULL DEFAULT 0;
-            ALTER TABLE sleep_readings ADD COLUMN date_key TEXT NOT NULL DEFAULT '';
-            CREATE INDEX IF NOT EXISTS idx_sleep_readings_date_key
-                ON sleep_readings(date_key);
-
-            ALTER TABLE recovery_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local';
-
-            ALTER TABLE daily_strain_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local';
-            ALTER TABLE daily_strain_readings ADD COLUMN strain_kilojoules REAL NOT NULL DEFAULT 0;
+            -- v24: source columns + WHOOP-shaped sleep fields. Schema
+            -- ADD COLUMNs are handled idempotently in
+            -- ensure_v24_typed_table_columns below — SQLite doesn't have
+            -- ADD COLUMN IF NOT EXISTS and this whole batch re-runs on
+            -- every open, so unconditional ALTERs would throw the second
+            -- time. CREATE INDEX on date_key moves there too because the
+            -- column has to exist before the index can be built.
 
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (24);
             PRAGMA user_version = 24;
@@ -1927,6 +1916,61 @@ impl GooseStore {
         self.ensure_daily_activity_metric_multi_row_source_kind()?;
         self.ensure_daily_recovery_metric_multi_row_source_kind()?;
         self.ensure_step_counter_sample_columns()?;
+        self.ensure_v24_typed_table_columns()?;
+        Ok(())
+    }
+
+    /// v24 column additions to sleep_readings / recovery_readings /
+    /// daily_strain_readings. SQLite doesn't have ADD COLUMN IF NOT
+    /// EXISTS and the migrate() batch re-runs unconditionally on every
+    /// open, so unconditional ALTERs would throw the second time. Use
+    /// the same `table_columns_unchecked` check-before-add pattern the
+    /// older `ensure_*_columns` helpers use.
+    fn ensure_v24_typed_table_columns(&self) -> GooseResult<()> {
+        let sleep_cols = self.table_columns_unchecked("sleep_readings")?;
+        for (name, ddl) in [
+            ("source", "source TEXT NOT NULL DEFAULT 'goose.local'"),
+            ("rem_minutes", "rem_minutes INTEGER NOT NULL DEFAULT 0"),
+            ("cycle_count", "cycle_count INTEGER NOT NULL DEFAULT 0"),
+            ("disturbance_count", "disturbance_count INTEGER NOT NULL DEFAULT 0"),
+            ("sleep_need_ms", "sleep_need_ms INTEGER NOT NULL DEFAULT 0"),
+            ("date_key", "date_key TEXT NOT NULL DEFAULT ''"),
+        ] {
+            if !sleep_cols.contains(name) {
+                self.conn
+                    .execute(&format!("ALTER TABLE sleep_readings ADD COLUMN {ddl}"), [])?;
+            }
+        }
+
+        let recovery_cols = self.table_columns_unchecked("recovery_readings")?;
+        if !recovery_cols.contains("source") {
+            self.conn.execute(
+                "ALTER TABLE recovery_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'goose.local'",
+                [],
+            )?;
+        }
+
+        let strain_cols = self.table_columns_unchecked("daily_strain_readings")?;
+        for (name, ddl) in [
+            ("source", "source TEXT NOT NULL DEFAULT 'goose.local'"),
+            ("strain_kilojoules", "strain_kilojoules REAL NOT NULL DEFAULT 0"),
+        ] {
+            if !strain_cols.contains(name) {
+                self.conn.execute(
+                    &format!("ALTER TABLE daily_strain_readings ADD COLUMN {ddl}"),
+                    [],
+                )?;
+            }
+        }
+
+        // Index on the new date_key column. Must run AFTER the ALTER
+        // TABLE above. CREATE INDEX IF NOT EXISTS is idempotent so this
+        // is safe on every open.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sleep_readings_date_key \
+             ON sleep_readings(date_key)",
+            [],
+        )?;
         Ok(())
     }
 

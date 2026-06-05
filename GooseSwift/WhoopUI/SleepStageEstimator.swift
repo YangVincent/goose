@@ -67,41 +67,77 @@ enum SleepStageEstimator {
       return Hypnogram(windowStart: window.start, windowEnd: window.end, epochs: [], stageMinutes: [:])
     }
 
-    // Build a per-epoch HR series
+    // Single-pass walk: instead of N×M filters, sort once and advance
+    // pointers across the HR and sensor streams as we step through epochs.
+    // Sleep windows are ~7 hours × ~25k HR samples × ~840 epochs; the old
+    // filter-per-epoch implementation was 21M ops on the main thread and
+    // hung the Sleep tab for seconds.
+    let hrSorted = hrSamples.sorted { $0.capturedAt < $1.capturedAt }
+    let sensorSorted = sensorSamples.sorted { $0.capturedAt < $1.capturedAt }
+    var hrIdx = 0
+    var sensorIdx = 0
     var rawEpochs: [Epoch] = []
     var cursor = window.start
     while cursor.addingTimeInterval(epochSeconds) <= window.end.addingTimeInterval(0.5) {
       let end = cursor.addingTimeInterval(epochSeconds)
-      let hrInEpoch = hrSamples.filter { $0.capturedAt >= cursor && $0.capturedAt < end }.map { Double($0.bpm) }
-      let sensorInEpoch = sensorSamples.filter { $0.capturedAt >= cursor && $0.capturedAt < end }
 
-      // Skip epochs where we have no HR data (off-wrist or no capture).
-      if hrInEpoch.isEmpty {
+      // Advance hrIdx past anything before cursor (e.g. on first iteration
+      // or when sample timestamps drift behind the window).
+      while hrIdx < hrSorted.count && hrSorted[hrIdx].capturedAt < cursor {
+        hrIdx += 1
+      }
+      // Collect all HR samples whose capturedAt is in [cursor, end).
+      var hrSum: Int = 0
+      var hrCount: Int = 0
+      var hrValuesForStd: [Double] = []
+      var hrConsumeIdx = hrIdx
+      while hrConsumeIdx < hrSorted.count && hrSorted[hrConsumeIdx].capturedAt < end {
+        let bpm = hrSorted[hrConsumeIdx].bpm
+        hrSum += bpm
+        hrCount += 1
+        hrValuesForStd.append(Double(bpm))
+        hrConsumeIdx += 1
+      }
+
+      if hrCount == 0 {
         cursor = end
+        // hrIdx unchanged — next epoch starts where this one left off.
         continue
       }
 
-      let meanHR = hrInEpoch.reduce(0, +) / Double(hrInEpoch.count)
-      let hrStd = stddev(hrInEpoch, mean: meanHR)
+      // Same single-pass walk over sensor samples.
+      while sensorIdx < sensorSorted.count && sensorSorted[sensorIdx].capturedAt < cursor {
+        sensorIdx += 1
+      }
+      var rrIntervalsMs: [Int] = []
+      var lastSkinTempRaw: Int?
+      var contactOnCount = 0
+      var contactTotal = 0
+      var sensorConsumeIdx = sensorIdx
+      while sensorConsumeIdx < sensorSorted.count && sensorSorted[sensorConsumeIdx].capturedAt < end {
+        let sample = sensorSorted[sensorConsumeIdx]
+        if let rr = sample.rrIntervalsMS { rrIntervalsMs.append(contentsOf: rr) }
+        if let temp = sample.skinTempRaw { lastSkinTempRaw = temp }
+        if let contact = sample.skinContact {
+          contactTotal += 1
+          if contact != 0 { contactOnCount += 1 }
+        }
+        sensorConsumeIdx += 1
+      }
 
-      // RMSSD per-epoch from RR intervals across the sensor samples in
-      // this epoch.
-      let rrIntervalsMs: [Int] = sensorInEpoch.flatMap { $0.rrIntervalsMS ?? [] }
-      let rmssd: Double? = rrIntervalsMs.count >= 6 ? hrvRmssd(intervalsMS: rrIntervalsMs) : nil
-
-      // Skin temp ADC for this epoch — last seen value
-      let skinTemp = sensorInEpoch.compactMap(\.skinTempRaw).last
-
-      // Skin contact bit — drop epoch from staging if off-wrist majority.
-      let contactValues = sensorInEpoch.compactMap(\.skinContact)
-      let offWristCount = contactValues.filter { $0 == 0 }.count
-      let majorityOffWrist = !contactValues.isEmpty
-        && offWristCount > contactValues.count / 2
+      let majorityOffWrist = contactTotal > 0
+        && (contactTotal - contactOnCount) > contactTotal / 2
       if majorityOffWrist {
+        // Advance pointers and move on without emitting an epoch.
+        hrIdx = hrConsumeIdx
+        sensorIdx = sensorConsumeIdx
         cursor = end
         continue
       }
 
+      let meanHR = Double(hrSum) / Double(hrCount)
+      let hrStd = stddev(hrValuesForStd, mean: meanHR)
+      let rmssd: Double? = rrIntervalsMs.count >= 6 ? hrvRmssd(intervalsMS: rrIntervalsMs) : nil
       let stage = classify(
         meanHR: meanHR,
         hrStd: hrStd,
@@ -116,8 +152,10 @@ enum SleepStageEstimator {
         meanHR: meanHR,
         hrStd: hrStd,
         rmssdMS: rmssd,
-        skinTempRaw: skinTemp
+        skinTempRaw: lastSkinTempRaw
       ))
+      hrIdx = hrConsumeIdx
+      sensorIdx = sensorConsumeIdx
       cursor = end
     }
 

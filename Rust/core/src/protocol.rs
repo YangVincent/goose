@@ -1022,9 +1022,18 @@ fn extract_k18_extended_fields(
 ) -> (Option<u8>, Option<u16>, Option<[f32; 3]>) {
     // Empirically RE'd from 777 real K18 packets:
     //   payload[24..36] = accelerometer gravity vector (3 × f32 LE), |g|≈1
-    //   SpO2 and RR are not present in this firmware's K18 variant — the
-    //   bytes OpenWhoop documents for them are status/counter fields in
-    //   ours. Leave both None until we find their real positions.
+    //
+    // SpO2/RR caveat: OpenWhoop's recent K18 parser
+    // (github.com/bWanShiTong/openwhoop, whoop_data.rs:366-411) extracts
+    // SpO2 at their `data[48]` = our `payload[51]` for WHOOP 5.0 / Maverick.
+    // BUT — sampling 50 of the user's K18 frames shows payload[51] takes
+    // only 2 unique values (119 and 125) across that window, which is
+    // constant-ish status data, not a varying biometric. None of the
+    // other varying bytes in our user's K18 payloads look like a clean
+    // SpO2 signal (90-100 range during sleep). Either OpenWhoop's RE is
+    // for a different firmware revision, or the SpO2 byte moved on the
+    // user's strap. Leave None until firmware-specific RE confirms the
+    // real offset for this device.
     let spo2_pct: Option<u8> = None;
     let rr_interval_ms: Option<u16> = None;
 

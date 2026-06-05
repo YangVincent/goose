@@ -2498,6 +2498,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(strain_list_dates_present_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "whoop.migrate_to_typed_tables" => request_args::<WhoopMigrateArgs>(&request)
+            .and_then(whoop_migrate_to_typed_tables_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.compute_reading" => request_args::<SleepComputeReadingArgs>(&request)
             .and_then(sleep_compute_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -8001,6 +8005,11 @@ struct StrainListDatesPresentArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct WhoopMigrateArgs {
+    database_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SwiftCacheRangeLimitArgs {
     database_path: String,
     start_time_unix_ms: i64,
@@ -8480,6 +8489,14 @@ fn strain_list_dates_present_bridge(
     let store = open_bridge_store(&args.database_path)?;
     let dates = store.daily_strain_dates_present(&args.start_date, &args.end_date)?;
     Ok(serde_json::json!({ "date_keys": dates }))
+}
+
+fn whoop_migrate_to_typed_tables_bridge(
+    args: WhoopMigrateArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = store.whoop_migrate_to_typed_tables()?;
+    serde_json::to_value(&report).map_err(|error| GooseError::message(error.to_string()))
 }
 
 /// Read the most-recent `recovery_readings` row plus a trailing N-day

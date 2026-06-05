@@ -405,6 +405,19 @@ pub struct RawPacketBodyRow {
 }
 
 /// One-shot recovery summary returned by
+/// Per-table counts emitted by `whoop_migrate_to_typed_tables`. Sent
+/// back over the bridge to surface in the iOS migration UI / telemetry.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WhoopMigrationReport {
+    pub dates_seen: i64,
+    pub sleep_rows_landed: i64,
+    pub sleep_rows_skipped_local_wins: i64,
+    pub recovery_rows_landed: i64,
+    pub recovery_rows_skipped_local_wins: i64,
+    pub strain_rows_landed: i64,
+    pub vitals_rows_landed: i64,
+}
+
 /// `recover_hr_samples_from_decoded_frames`. Diagnostic only; callers can
 /// surface this to the UI ("recovered N HR samples from decoded frames").
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1576,6 +1589,111 @@ impl GooseStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn upsert_daily_vitals_reading(
+        &self,
+        date_key: &str,
+        spo2_pct: Option<f64>,
+        skin_temp_c: Option<f64>,
+        source: &str,
+    ) -> GooseResult<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO daily_vitals_readings (date_key, spo2_pct, skin_temp_c, source)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(date_key) DO UPDATE SET
+                spo2_pct = excluded.spo2_pct,
+                skin_temp_c = excluded.skin_temp_c,
+                source = excluded.source,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE NOT (daily_vitals_readings.source = 'goose.local'
+                           AND excluded.source = 'whoop.cloud')
+            "#,
+            params![date_key, spo2_pct, skin_temp_c, source],
+        )?;
+        Ok(())
+    }
+
+    /// Iterate every imported_daily_summary date_key, convert via the
+    /// WHOOP→typed helpers, and upsert into the three (four counting
+    /// vitals) typed tables. Returns a per-table count of rows landed.
+    /// Idempotent: same converters running again hit ON CONFLICT and
+    /// no-op when local rows already exist.
+    pub fn whoop_migrate_to_typed_tables(&self) -> GooseResult<WhoopMigrationReport> {
+        let dates = crate::whoop_import::imported_date_keys(&self.conn)?;
+        let mut report = WhoopMigrationReport::default();
+        report.dates_seen = dates.len() as i64;
+
+        for date_key in &dates {
+            if let Some(sleep) = crate::whoop_import::sleep_reading_from_whoop_import(
+                &self.conn, date_key,
+            )? {
+                // Conflict rule: never overwrite a goose.local sleep_readings
+                // row. Check the synthesized whoop-* session_id isn't taken
+                // by a goose.local row first.
+                let conflict: Option<String> = self
+                    .conn
+                    .query_row(
+                        "SELECT source FROM sleep_readings WHERE date_key = ?1 \
+                         AND source = 'goose.local' LIMIT 1",
+                        params![date_key],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if conflict.is_none() {
+                    self.upsert_sleep_reading(&sleep)?;
+                    report.sleep_rows_landed += 1;
+                } else {
+                    report.sleep_rows_skipped_local_wins += 1;
+                }
+            }
+
+            if let Some(recovery) = crate::whoop_import::recovery_reading_from_whoop_import(
+                &self.conn, date_key,
+            )? {
+                let conflict: Option<String> = self
+                    .conn
+                    .query_row(
+                        "SELECT source FROM recovery_readings WHERE date_key = ?1 \
+                         AND source = 'goose.local' LIMIT 1",
+                        params![date_key],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if conflict.is_none() {
+                    self.upsert_recovery_reading(&recovery)?;
+                    report.recovery_rows_landed += 1;
+                } else {
+                    report.recovery_rows_skipped_local_wins += 1;
+                }
+            }
+
+            if let Some((dk, score, kj)) = crate::whoop_import::daily_strain_reading_from_whoop_import(
+                &self.conn, date_key,
+            )? {
+                // Strain conflict rule is enforced by the upsert's WHERE
+                // clause, so no pre-check needed here.
+                self.upsert_daily_strain_reading(
+                    &dk,
+                    "whoop.cloud",
+                    score,
+                    kj,
+                    0.0, 0.0, 0, 0.0, 0.0, 0, None,
+                    "{}",
+                )?;
+                report.strain_rows_landed += 1;
+            }
+
+            if let Some((dk, spo2, skin_temp)) = crate::whoop_import::daily_vitals_from_whoop_import(
+                &self.conn, date_key,
+            )? {
+                self.upsert_daily_vitals_reading(&dk, spo2, skin_temp, "whoop.cloud")?;
+                report.vitals_rows_landed += 1;
+            }
+        }
+
+        Ok(report)
     }
 
     pub fn daily_strain_reading_for_date(

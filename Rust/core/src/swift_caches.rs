@@ -446,6 +446,17 @@ pub struct DailyReadingsRow {
     pub vitals_source: Option<String>,
 }
 
+/// Per-row outcome of `promote_decoded_historical_to_sensor_samples`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PromoteHistoricalReport {
+    pub frames_scanned: i64,
+    pub frames_unparsable: i64,
+    pub frames_no_timestamp: i64,
+    pub frames_skipped_other_body: i64,
+    pub samples_inserted: i64,
+    pub samples_already_present: i64,
+}
+
 /// Per-table counts emitted by `whoop_migrate_to_typed_tables`. Sent
 /// back over the bridge to surface in the iOS migration UI / telemetry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1654,6 +1665,128 @@ impl GooseStore {
             params![date_key, spo2_pct, skin_temp_c, source],
         )?;
         Ok(())
+    }
+
+    /// Promote `decoded_frames` rows with RawSensorHistory bodies
+    /// (K12 / K24 historical packets) into `sensor_samples`. The live
+    /// event pipeline only converts K10 / K21 motion packets into
+    /// SensorSamples; the K12 / K24 historical sync path that carries
+    /// PPG / SpO2 / skin_temp / ambient_light / signal_quality doesn't
+    /// have a SensorSample writer. This walks decoded_frames, re-parses
+    /// each via `protocol::parsed_payload_from_payload_hex`, and inserts
+    /// one sensor_samples row per historical frame with the vitals
+    /// columns filled.
+    ///
+    /// Idempotent: sample_id collisions hit `INSERT OR IGNORE` and the
+    /// row is skipped. Safe to run repeatedly.
+    pub fn promote_decoded_historical_to_sensor_samples(
+        &self,
+    ) -> GooseResult<PromoteHistoricalReport> {
+        use crate::protocol::{DataPacketBodySummary, ParsedPayload, parsed_payload_from_payload_hex};
+
+        let mut report = PromoteHistoricalReport::default();
+        let mut stmt = self.conn.prepare(
+            "SELECT df.frame_id, e.captured_at, df.payload_hex \
+             FROM decoded_frames df \
+             JOIN raw_evidence e ON e.evidence_id = df.evidence_id \
+             WHERE df.packet_type = 47 \
+             ORDER BY e.captured_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (frame_id, captured_at, payload_hex) = row?;
+            report.frames_scanned += 1;
+            let parsed = match parsed_payload_from_payload_hex(
+                &payload_hex,
+                &format!("decoded_frames {frame_id}"),
+            ) {
+                Ok(Some(p)) => p,
+                Ok(None) | Err(_) => {
+                    report.frames_unparsable += 1;
+                    continue;
+                }
+            };
+            let ParsedPayload::DataPacket {
+                body_summary: Some(body),
+                ..
+            } = parsed
+            else {
+                report.frames_skipped_other_body += 1;
+                continue;
+            };
+            let DataPacketBodySummary::RawSensorHistory {
+                heart_rate_bpm,
+                rr_intervals_ms,
+                sensor_data: Some(sd),
+                ..
+            } = body
+            else {
+                report.frames_skipped_other_body += 1;
+                continue;
+            };
+            // Convert ISO-8601 captured_at to unix ms. SQLite's strftime
+            // can do this server-side cleanly.
+            let captured_at_ms: i64 = self
+                .conn
+                .query_row(
+                    "SELECT CAST(strftime('%s', ?1) AS INTEGER) * 1000 + \
+                     CAST(substr(?1, 21, 3) AS INTEGER)",
+                    params![captured_at],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if captured_at_ms <= 0 {
+                report.frames_no_timestamp += 1;
+                continue;
+            }
+            let sample_id = format!(
+                "promoted.{}.{}.rust.k12_k24",
+                captured_at_ms, frame_id
+            );
+            let bpm = heart_rate_bpm.map(i64::from);
+            let rr_json: Option<String> = if rr_intervals_ms.is_empty() {
+                None
+            } else {
+                let v: Vec<i64> = rr_intervals_ms.iter().map(|x| *x as i64).collect();
+                Some(serde_json::to_string(&v).unwrap_or_default())
+            };
+            let changed = self.conn.execute(
+                "INSERT OR IGNORE INTO sensor_samples ( \
+                     sample_id, captured_at_ms, source, bpm, rr_intervals_ms, \
+                     ppg_green, ppg_red_ir, spo2_red, spo2_ir, \
+                     skin_temp_raw, ambient_light, \
+                     led_drive_1, led_drive_2, signal_quality, skin_contact \
+                 ) VALUES (?1, ?2, 'rust.k12_k24', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![
+                    sample_id,
+                    captured_at_ms,
+                    bpm,
+                    rr_json,
+                    i64::from(sd.ppg_green),
+                    i64::from(sd.ppg_red_ir),
+                    i64::from(sd.spo2_red),
+                    i64::from(sd.spo2_ir),
+                    i64::from(sd.skin_temp_raw),
+                    i64::from(sd.ambient_light),
+                    i64::from(sd.led_drive_1),
+                    i64::from(sd.led_drive_2),
+                    i64::from(sd.signal_quality),
+                    i64::from(sd.skin_contact),
+                ],
+            )?;
+            if changed > 0 {
+                report.samples_inserted += 1;
+            } else {
+                report.samples_already_present += 1;
+            }
+        }
+        Ok(report)
     }
 
     /// Iterate every imported_daily_summary date_key, convert via the

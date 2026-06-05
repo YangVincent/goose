@@ -381,13 +381,14 @@ extension GooseAppModel {
     let id = "\(Int(capturedAt.timeIntervalSince1970 * 1000)).\(bpm ?? 0).\(source)"
 
     // RawSensorHistory wraps the channels under "sensor_data" via Serde.
-    // NormalHistory (K18) carries spo2_pct, rr_interval_ms, accel_gravity
-    // as top-level fields after our recent extension.
+    // NormalHistory (K18) carries spo2_pct, skin_temp_raw, rr_interval_ms,
+    // accel_gravity as top-level fields after the K18 byte-offset RE.
     let sensor = body["sensor_data"] as? [String: Any]
     let rrFromArray = body["rr_intervals_ms"] as? [Int]
     let rrFromScalar = (body["rr_interval_ms"] as? Int).map { [$0] }
     let gravityArray = body["accel_gravity"] as? [Double]
     let spo2Pct = intValue(body["spo2_pct"])
+    let skinTempRaw = intValue(sensor?["skin_temp_raw"]) ?? intValue(body["skin_temp_raw"])
 
     return SensorSample(
       id: id,
@@ -400,7 +401,7 @@ extension GooseAppModel {
       spo2Red: intValue(sensor?["spo2_red"]),
       spo2IR: intValue(sensor?["spo2_ir"]),
       spo2Pct: spo2Pct,
-      skinTempRaw: intValue(sensor?["skin_temp_raw"]),
+      skinTempRaw: skinTempRaw,
       ambientLight: intValue(sensor?["ambient_light"]),
       ledDrive1: intValue(sensor?["led_drive_1"]),
       ledDrive2: intValue(sensor?["led_drive_2"]),

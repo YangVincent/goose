@@ -206,7 +206,9 @@ struct SleepDetailView: View {
           }
         }
 
-        importStatusRow
+        // importStatusRow removed — "N WHOOP nights cached" was a
+        // leftover bootstrap-progress indicator that's no longer
+        // useful now that the import is stable.
 
         if let hypno = hypnoStore.lastNight ?? importedHypnogram, !hypno.epochs.isEmpty {
           hypnogramAxis(hypno)

@@ -275,6 +275,8 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> f64 {
         rmssd_vals.iter().sum::<f64>() / rmssd_vals.len() as f64
     };
 
+    // Deep-sleep HR cap kept at resting+3 (original). The RMSSD gate
+    // below was the wrong knob; HR alone is restrictive enough.
     let asleep_threshold = options.resting_bpm as f64 + 3.0;
     let awake_threshold = options.resting_bpm as f64 + 10.0;
 
@@ -287,7 +289,12 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> f64 {
             row.stage = Stage::Awake;
         } else if hr_mean <= asleep_threshold
             && row.movement < move_median
-            && row.rmssd.is_none_or(|v| v >= rmssd_window_mean * 0.9)
+            // RMSSD gate dropped — the previous `>= 0.9 × window-mean`
+            // gate excluded most deep candidates because deep sleep
+            // physiology has *lower* HRV, not higher. With the gate
+            // gone, deep is "low HR + low movement" full stop. Future
+            // refinement (TODO #46): use a window in [0.5×mean, 1.0×mean]
+            // once we have nightly baselines per user.
         {
             row.stage = Stage::Deep;
         } else {

@@ -251,27 +251,45 @@ final class DayStrainStore: ObservableObject {
     let finalStrain: Double
   }
 
-  /// Compute today's strain using per-activity calibrated formulas.
-  ///
-  /// Algorithm:
-  /// 1. Pull today's HR samples and completed workouts.
-  /// 2. Group workouts by which `StrainFormula` they map to.
-  /// 3. Within each group: sum the workout's effective-kJ (using its
-  ///    formula's per-zone rates), then apply the group's formula to
-  ///    produce a group strain.
-  /// 4. Background (non-workout) HR samples flow through the running
-  ///    formula's per-second rate, producing a background strain.
-  /// 5. Combine all group strains + background via cube-root sum so a
-  ///    mixed day (run + yoga) doesn't go superlinear, and a same-activity
-  ///    multi-session day matches summing the loads.
+  /// Refresh `today` against the current calendar day. Thin wrapper
+  /// around [`compute(for:)`] — kept so existing callers (AppShell,
+  /// HRRecoveryButton) don't need to know about the date arg.
   func refresh() {
     let now = Date()
-    let allSamples = HeartRateSeriesStore.shared.samples(forDayContaining: now)
-    let offWristWindows = SensorSampleStore.shared.offWristWindows()
+    let result = DayStrainStore.compute(for: now)
+    today = result.strain
+    debug = result.debug
+  }
+
+  /// Compute strain for any calendar day using the per-activity
+  /// calibrated formulas. Same algorithm for today (live, in-memory)
+  /// and past days (finalized into SQLite by [`StrainFinalizer`]):
+  ///
+  /// 1. Pull HR samples for the reference day.
+  /// 2. Group workouts that started in that day by their `StrainFormula`.
+  /// 3. Within each group, sum each workout's effective-kJ (per-zone rates)
+  ///    and apply the group's formula to produce a group strain.
+  /// 4. Non-workout HR flows through the **walking** formula — gentler
+  ///    than running so "alive but not training" doesn't accumulate
+  ///    excessive strain over a long awake window.
+  /// 5. Combine group strains + background via cube-root sum so a mixed
+  ///    day (run + yoga) doesn't go superlinear, and a same-activity
+  ///    multi-session day matches summing the loads.
+  ///
+  /// Returns a pure value — no side effects on `today`. Callers decide
+  /// whether to publish or persist.
+  static func compute(for referenceDate: Date)
+    -> (strain: DayStrainCalculator.DayStrain, debug: DebugSnapshot)
+  {
     let calendar = Calendar.current
-    let dayStart = calendar.startOfDay(for: now)
-    let workoutsToday = CompletedWorkoutStore.shared.workouts.filter { $0.startedAt >= dayStart }
-    let workoutWindows: [(Date, Date)] = workoutsToday.map { ($0.startedAt, $0.endedAt) }
+    let dayStart = calendar.startOfDay(for: referenceDate)
+    let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? referenceDate
+    let allSamples = HeartRateSeriesStore.shared.samples(forDayContaining: referenceDate)
+    let offWristWindows = SensorSampleStore.shared.offWristWindows()
+    let workoutsForDay = CompletedWorkoutStore.shared.workouts.filter {
+      $0.startedAt >= dayStart && $0.startedAt < dayEnd
+    }
+    let workoutWindows: [(Date, Date)] = workoutsForDay.map { ($0.startedAt, $0.endedAt) }
 
     // 1. Non-workout HR samples (samples inside any workout window get
     // attributed to that workout's formula instead).
@@ -279,7 +297,7 @@ final class DayStrainStore: ObservableObject {
       !workoutWindows.contains { sample.capturedAt >= $0.0 && sample.capturedAt <= $0.1 }
     }
     let offWristFiltered = Self.filterOffWrist(nonWorkoutSamples, offWristWindows: offWristWindows)
-    let bgFormula = DayStrainCalculator.runningFormula
+    let bgFormula = DayStrainCalculator.walkingFormula
     var bgEffectiveKJ: Double = 0
     var lastTime: Date?
     for sample in offWristFiltered.sorted(by: { $0.capturedAt < $1.capturedAt }) {
@@ -298,7 +316,7 @@ final class DayStrainStore: ObservableObject {
     // then apply that group's formula to its summed eff-kJ.
     var groups: [String: (formula: DayStrainCalculator.StrainFormula, effectiveKJ: Double)] = [:]
     var allZoneMinutes: [Int: Double] = [:]
-    for workout in workoutsToday {
+    for workout in workoutsForDay {
       let formula = DayStrainCalculator.formula(forActivityRaw: workout.activityRaw)
       var workoutEffKJ: Double = 0
       for (zone, seconds) in workout.zoneDurations {
@@ -322,10 +340,10 @@ final class DayStrainStore: ObservableObject {
       let f = DateFormatter()
       f.dateFormat = "yyyy-MM-dd"
       f.timeZone = TimeZone.current
-      return f.string(from: now)
+      return f.string(from: dayStart)
     }()
 
-    today = DayStrainCalculator.DayStrain(
+    let strain = DayStrainCalculator.DayStrain(
       dateKey: dateKey,
       strain: combinedStrain,
       trimp: bgEffectiveKJ + groups.values.reduce(0) { $0 + $1.effectiveKJ },
@@ -333,8 +351,8 @@ final class DayStrainStore: ObservableObject {
       zoneMinutes: allZoneMinutes,
       lastSampleAt: allSamples.last?.capturedAt
     )
-    debug = DebugSnapshot(
-      workoutsFound: workoutsToday.count,
+    let debug = DebugSnapshot(
+      workoutsFound: workoutsForDay.count,
       totalHRSamples: allSamples.count,
       nonWorkoutSamples: nonWorkoutSamples.count,
       backgroundTRIMP: bgEffectiveKJ,
@@ -343,6 +361,85 @@ final class DayStrainStore: ObservableObject {
       totalTRIMP: bgEffectiveKJ + groups.values.reduce(0) { $0 + $1.effectiveKJ },
       finalStrain: combinedStrain
     )
+    return (strain, debug)
+  }
+
+  /// Run StrainFinalizer against the last `lookbackDays` calendar days
+  /// (default 7). Idempotent — only computes days that don't yet have a
+  /// `daily_strain_readings` row. Safe to call from `.onAppear` or app
+  /// foreground; the bridge calls are cheap and gate everything.
+  static func finalizePastDaysIfNeeded(lookbackDays: Int = 7) {
+    let bridge = GooseRustBridge()
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let calendar = Calendar.current
+    let todayStart = calendar.startOfDay(for: Date())
+    guard let earliestStart = calendar.date(byAdding: .day, value: -lookbackDays, to: todayStart)
+    else { return }
+
+    // Inclusive YYYY-MM-DD bounds. The range is [earliest, yesterday];
+    // today is excluded because it's the in-memory live `dayStrain.today`.
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = TimeZone.current
+    let endStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? earliestStart
+    guard earliestStart <= endStart else { return }
+    let startKey = formatter.string(from: earliestStart)
+    let endKey = formatter.string(from: endStart)
+
+    let presentResp = try? bridge.request(
+      method: "strain.list_dates_present",
+      args: ["database_path": dbPath, "start_date": startKey, "end_date": endKey]
+    )
+    let present: Set<String> = Set((presentResp?["date_keys"] as? [String]) ?? [])
+
+    var cursor = earliestStart
+    while cursor <= endStart {
+      let key = formatter.string(from: cursor)
+      defer { cursor = calendar.date(byAdding: .day, value: 1, to: cursor) ?? cursor.addingTimeInterval(86400) }
+      if present.contains(key) { continue }
+      let result = DayStrainStore.compute(for: cursor)
+      let strain = result.strain
+      let debug = result.debug
+      var readingJSON = "{}"
+      let payload: [String: Any] = [
+        "date_key": strain.dateKey,
+        "strain": strain.strain,
+        "trimp": strain.trimp,
+        "sample_count": strain.sampleCount,
+        "zone_minutes": strain.zoneMinutes.reduce(into: [String: Double]()) { $0[String($1.key)] = $1.value },
+        "last_sample_at_unix_ms": strain.lastSampleAt.map { Int($0.timeIntervalSince1970 * 1000) } as Any,
+        "debug": [
+          "workouts_found": debug.workoutsFound,
+          "total_hr_samples": debug.totalHRSamples,
+          "non_workout_samples": debug.nonWorkoutSamples,
+          "background_trimp": debug.backgroundTRIMP,
+          "workout_edwards_raw": debug.workoutEdwardsRaw,
+          "workout_edwards_scaled": debug.workoutEdwardsScaled,
+          "total_trimp": debug.totalTRIMP,
+          "final_strain": debug.finalStrain,
+        ],
+      ]
+      if let data = try? JSONSerialization.data(withJSONObject: payload),
+         let text = String(data: data, encoding: .utf8) {
+        readingJSON = text
+      }
+      _ = try? bridge.request(
+        method: "strain.upsert_reading",
+        args: [
+          "database_path": dbPath,
+          "date_key": strain.dateKey,
+          "strain_score": strain.strain,
+          "background_strain": 0.0,
+          "background_effective_kj": debug.backgroundTRIMP,
+          "workout_count": debug.workoutsFound,
+          "workout_effective_kj": debug.workoutEdwardsRaw,
+          "workout_strain_sum": debug.workoutEdwardsScaled,
+          "sample_count": strain.sampleCount,
+          "last_sample_at_unix_ms": (strain.lastSampleAt.map { Int($0.timeIntervalSince1970 * 1000) }) ?? NSNull(),
+          "reading_json": readingJSON,
+        ]
+      )
+    }
   }
 
   /// Drop samples inside any merged off-wrist window — same logic as

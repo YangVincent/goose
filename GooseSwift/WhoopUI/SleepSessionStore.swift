@@ -92,6 +92,62 @@ final class SleepSessionStore: ObservableObject {
     }
   }
 
+  /// One-shot backfill for the 2026-06-04 sleep window (00:40 → 08:35
+  /// EDT). The auto-detect bug fixed in `f38f577` set `active = nil`
+  /// without going through `endSleep()`, so that night never reached
+  /// the persistence path. The reading + recovery were computed from
+  /// SQLite-side HR/HRV data and verified out-of-band (82.7 / 71.6), so
+  /// the data exists — only the PastSession metadata is missing.
+  ///
+  /// Idempotent: skip if a session already lives in the same window.
+  /// detectionLog is rebuilt from HR samples so the SLEEP SESSION card
+  /// surfaces the real wake spells. Safe to call from `.onAppear` or
+  /// `runPacketScores()` — first caller writes, the rest no-op.
+  func backfillKnownNightIfMissing() {
+    let start = Date(timeIntervalSince1970: 1_780_548_000)
+    let end = Date(timeIntervalSince1970: 1_780_576_500)
+    if pastSessions.contains(where: { abs($0.startedAt.timeIntervalSince(start)) < 60 }) {
+      return
+    }
+    let resting = HeartRateSeriesStore.shared.restingEstimate()?.bpm
+                  ?? Double(UserProfile.restingHeartRate)
+    let asleep = resting + 5
+    let awake = resting + 12
+    let samples = HeartRateSeriesStore.shared.samples(from: start, to: end)
+    let stride: TimeInterval = 60
+    var log: [DetectionSample] = []
+    var cursor = start
+    while cursor <= end {
+      let cutoff = cursor.addingTimeInterval(-30 * 60)
+      let recent = samples.filter { $0.capturedAt >= cutoff && $0.capturedAt <= cursor }
+      let meanHR: Double?
+      if recent.count >= 5 {
+        var total: Int = 0
+        for sample in recent { total += sample.bpm }
+        meanHR = Double(total) / Double(recent.count)
+      } else {
+        meanHR = nil
+      }
+      let state: DetectionSample.InferredState
+      if let m = meanHR {
+        if m <= asleep { state = .asleep }
+        else if m >= awake { state = .awake }
+        else { state = .unknown }
+      } else {
+        state = .unknown
+      }
+      log.append(DetectionSample(
+        time: cursor, meanHR: meanHR, restingBaseline: resting,
+        asleepThreshold: asleep, awakeThreshold: awake, inferredState: state
+      ))
+      cursor = cursor.addingTimeInterval(stride)
+    }
+    let session = PastSession(id: UUID(), startedAt: start, endedAt: end, detectionLog: log)
+    pastSessions.insert(session, at: 0)
+    if pastSessions.count > 30 { pastSessions = Array(pastSessions.prefix(30)) }
+    Self.persist(pastSessions, key: storageKey)
+  }
+
   /// User taps "Start Sleep" — record start time, arm the audio recorder,
   /// and kick off the 1-min detection timer. Audio is on for the full
   /// session by design; the range between startedAt and endedAt is what

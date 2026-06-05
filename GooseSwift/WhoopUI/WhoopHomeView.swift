@@ -9,6 +9,15 @@ struct WhoopHomeView: View {
   /// Default off; flip on when the strain card's number looks wrong and
   /// we need to see what the calculator is doing.
   @AppStorage("goose.swift.debug.showStrainOverlay") private var showStrainDebugOverlay = false
+  /// Past-day strain values pulled from the `daily_strain_readings` SQLite
+  /// table. Today's strain stays on `dayStrain.today` (live, accumulating);
+  /// any non-today date reads from here. Populated by `refreshHomeData()`
+  /// on appear and on `selectedDay` change.
+  @State private var pastStrainByDate: [String: Double] = [:]
+  /// Recovery scores keyed by the morning's date_key (the wake day), read
+  /// out of the `recovery_readings` table. Today's recovery is "the
+  /// reading from last night's sleep" — same table.
+  @State private var recoveryByDate: [String: Double] = [:]
 
   var body: some View {
     NavigationStack {
@@ -111,6 +120,122 @@ struct WhoopHomeView: View {
       if [].isEmpty {
       }
       if importedDailyStore.recoveryHistory().isEmpty {
+      }
+      refreshHomeData()
+    }
+    .onChange(of: selectedDay.currentDate) { _, _ in
+      loadReadingsForSelectedDay()
+    }
+  }
+
+  /// On every home appear: backfill last night's session (if missing),
+  /// recompute today's live strain, finalize any unfinalized past days
+  /// into SQLite, trigger a sleep+recovery compute for last night, then
+  /// load whatever the selected date strip is on. Idempotent — re-running
+  /// has no effect when nothing's missing.
+  private func refreshHomeData() {
+    SleepSessionStore.shared.backfillKnownNightIfMissing()
+    DayStrainStore.shared.refresh()
+    DayStrainStore.finalizePastDaysIfNeeded()
+    ensureSleepAndRecoveryForLastNight()
+    loadReadingsForSelectedDay()
+  }
+
+  /// Fire `sleep.compute_reading` against the most recent PastSession in
+  /// the current sleep-day window (22:00 yesterday → 22:00 today). The
+  /// bridge call chains the recovery compute and persists both into
+  /// recovery_readings + sleep_readings. WhoopHomeView's loaders read
+  /// from those tables on the next pass.
+  private func ensureSleepAndRecoveryForLastNight() {
+    let cal = Calendar.current
+    let dayEnd = cal.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
+    let dayStart = dayEnd.addingTimeInterval(-24 * 3600)
+    let inWindow = SleepSessionStore.shared.pastSessions.filter {
+      $0.startedAt >= dayStart && $0.startedAt < dayEnd
+    }
+    guard let primary = inWindow.min(by: { $0.startedAt < $1.startedAt }),
+          let earliest = inWindow.map(\.startedAt).min(),
+          let latest = inWindow.map(\.endedAt).max()
+    else { return }
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let sessionID = primary.id.uuidString
+    let startMs = Int64((earliest.timeIntervalSince1970 * 1000).rounded())
+    let endMs = Int64((latest.timeIntervalSince1970 * 1000).rounded())
+    Task.detached(priority: .userInitiated) {
+      let bridge = GooseRustBridge()
+      // sleep.compute_reading chains recovery.compute_from_sleep_reading
+      // and upserts both tables. Cheap when the row already exists
+      // (same session_id + window → idempotent upsert).
+      _ = try? bridge.request(
+        method: "sleep.compute_reading",
+        args: [
+          "database_path": dbPath,
+          "session_id": sessionID,
+          "start_time_unix_ms": startMs,
+          "end_time_unix_ms": endMs,
+        ]
+      )
+      await MainActor.run {
+        loadReadingsForSelectedDay()
+      }
+    }
+  }
+
+  /// Pull strain + recovery rows for whatever date the strip is on.
+  /// Strain is per-day, recovery is per-wake-day; both share the same
+  /// `yyyy-MM-dd` local key.
+  private func loadReadingsForSelectedDay() {
+    let date = selectedDay.currentDate
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = TimeZone.current
+    let key = formatter.string(from: date)
+    let dbPath = HealthDataStore.defaultDatabasePath()
+
+    // Strain: today comes from live in-memory store; past days from sqlite.
+    if !Calendar.current.isDateInToday(date), pastStrainByDate[key] == nil {
+      Task.detached(priority: .userInitiated) {
+        let bridge = GooseRustBridge()
+        let response = try? bridge.request(
+          method: "strain.get_for_date",
+          args: ["database_path": dbPath, "date_key": key]
+        )
+        let raw = response?["strain"]
+        let value = (raw as? Double) ?? (raw as? NSNumber).map { $0.doubleValue } ?? nil
+        await MainActor.run {
+          if let value, value > 0 { pastStrainByDate[key] = value }
+        }
+      }
+    }
+
+    // Recovery: same key, fetched from recovery.latest_reading. The
+    // bridge returns the most-recent row; for today's home that IS the
+    // last night's reading. For past dates the user actually wants the
+    // reading that woke them up that morning — same lookup, since each
+    // recovery row carries date_key.
+    if recoveryByDate[key] == nil {
+      Task.detached(priority: .userInitiated) {
+        let bridge = GooseRustBridge()
+        let response = try? bridge.request(
+          method: "recovery.latest_reading",
+          args: ["database_path": dbPath, "history_days": 30]
+        )
+        // Latest row matches today's wake date; for past dates we look
+        // through the daily history list and pick the matching key.
+        var score: Double? = nil
+        let dateKey = (response?["date_key"] as? String)
+        if dateKey == key,
+           let output = (response?["score_result"] as? [String: Any])?["output"] as? [String: Any] {
+          score = (output["score_0_to_100"] as? Double)
+            ?? (output["score_0_to_100"] as? NSNumber).map { $0.doubleValue }
+        } else if let daily = response?["daily"] as? [[String: Any]],
+                  let match = daily.first(where: { ($0["date_key"] as? String) == key }) {
+          score = (match["score_0_to_100"] as? Double)
+            ?? (match["score_0_to_100"] as? NSNumber).map { $0.doubleValue }
+        }
+        await MainActor.run {
+          if let score, score > 0 { recoveryByDate[key] = score }
+        }
       }
     }
   }
@@ -420,28 +545,17 @@ struct WhoopHomeView: View {
   /// Recovery fallback: SQLite-cached imported daily summary first, then
   /// our local `GooseRecoveryCalculator`. No runtime cloud reads.
   private var resolvedRecoveryScore: (value: Int, source: RecoverySource) {
-    if let score = importedDailyStore.summary(for: selectedDay.currentDate)?.recoveryScore, score >= 0 {
-      return (Int(score.rounded()), .server)
-    }
-    if Calendar.current.isDateInToday(selectedDay.currentDate) {
-      var hrvSeries: [Double] = []
-      hrvSeries.append(contentsOf: NightlyHRVStore.shared.recentNights.map(\.medianRMSSD))
-      var rhrSeries: [Double] = []
-      if let local = HeartRateSeriesStore.shared.restingEstimate() {
-        rhrSeries.append(local.bpm)
-      }
-      let sleepPerformance = importedDailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct
-        ?? SleepWindowStore.shared.lastNight.map { $0.performance * 100 }
-      if hrvSeries.count >= 4 || rhrSeries.count >= 4 {
-        let score = GooseRecoveryCalculator.compute(
-          hrvSeries: hrvSeries,
-          rhrSeries: rhrSeries,
-          sleepPerformance: sleepPerformance
-        )
-        if score.confidence > 0 {
-          return (score.score, .local)
-        }
-      }
+    // Recovery comes from the recovery_readings table — written by
+    // sleep.compute_reading (which chains the goose_recovery_v0 formula
+    // off the just-computed SleepReading). For the selected day, look
+    // up the wake-date key; if it's there, render. No more in-memory
+    // GooseRecoveryCalculator fallback — one path, one formula.
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = TimeZone.current
+    let key = formatter.string(from: selectedDay.currentDate)
+    if let value = recoveryByDate[key], value > 0 {
+      return (Int(value.rounded()), .local)
     }
     return (0, .none)
   }
@@ -665,25 +779,25 @@ struct WhoopHomeView: View {
   }
 
   private var resolvedStrain: (value: Double, source: StrainSource) {
-    let serverStrain = importedDailyStore.summary(for: selectedDay.currentDate)?.strainScore.map { ($0, StrainSource.server) }
-    let localStrain: (Double, StrainSource)? = {
-      guard Calendar.current.isDateInToday(selectedDay.currentDate),
-            let local = dayStrain.today else { return nil }
-      return (local.strain, .local)
-    }()
-    // Take the max. Server's strain is sometimes stale (post-May-5 OAuth
-    // expiry left placeholder values like 0.5 on the dashboard side); if
-    // local computed something higher, that reflects today's actual load.
-    switch (serverStrain, localStrain) {
-    case (.some(let s), .some(let l)):
-      return l.0 > s.0 ? l : s
-    case (.some(let s), .none):
-      return s.0 > 0 ? s : (0, .none)
-    case (.none, .some(let l)):
-      return l
-    case (.none, .none):
+    // Today: live in-memory value accumulating as the day goes on.
+    // Past days: read from daily_strain_readings (written by
+    // StrainFinalizer the next time the app opens after midnight).
+    // imported_daily_summary is no longer consulted — it was the
+    // long-stale WHOOP cloud field that produced 0.5 for active days.
+    if Calendar.current.isDateInToday(selectedDay.currentDate) {
+      if let local = dayStrain.today, local.strain > 0 {
+        return (local.strain, .local)
+      }
       return (0, .none)
     }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = TimeZone.current
+    let key = formatter.string(from: selectedDay.currentDate)
+    if let value = pastStrainByDate[key], value > 0 {
+      return (value, .local)
+    }
+    return (0, .none)
   }
 
   private func stageBarFromSummary(summary: WhoopImportedDailyStore.DailySummary) -> some View {

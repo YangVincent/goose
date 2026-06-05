@@ -1493,6 +1493,99 @@ impl GooseStore {
         }
     }
 
+    /// Upsert a finalized daily strain reading. Keyed by `date_key`
+    /// (YYYY-MM-DD, local), so the same finalize pass re-running is
+    /// idempotent and a recompute (after a workout backfill, say)
+    /// updates the row in place.
+    pub fn upsert_daily_strain_reading(
+        &self,
+        date_key: &str,
+        strain_score: f64,
+        background_strain: f64,
+        background_effective_kj: f64,
+        workout_count: i64,
+        workout_effective_kj: f64,
+        workout_strain_sum: f64,
+        sample_count: i64,
+        last_sample_at_unix_ms: Option<i64>,
+        reading_json: &str,
+    ) -> GooseResult<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO daily_strain_readings (
+                date_key, strain_score, background_strain,
+                background_effective_kj, workout_count,
+                workout_effective_kj, workout_strain_sum,
+                sample_count, last_sample_at_unix_ms, reading_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(date_key) DO UPDATE SET
+                strain_score = excluded.strain_score,
+                background_strain = excluded.background_strain,
+                background_effective_kj = excluded.background_effective_kj,
+                workout_count = excluded.workout_count,
+                workout_effective_kj = excluded.workout_effective_kj,
+                workout_strain_sum = excluded.workout_strain_sum,
+                sample_count = excluded.sample_count,
+                last_sample_at_unix_ms = excluded.last_sample_at_unix_ms,
+                reading_json = excluded.reading_json,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            "#,
+            params![
+                date_key,
+                strain_score,
+                background_strain,
+                background_effective_kj,
+                workout_count,
+                workout_effective_kj,
+                workout_strain_sum,
+                sample_count,
+                last_sample_at_unix_ms,
+                reading_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn daily_strain_reading_for_date(
+        &self,
+        date_key: &str,
+    ) -> GooseResult<Option<String>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT reading_json FROM daily_strain_readings WHERE date_key = ?1",
+                params![date_key],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// All date_keys in [start_date, end_date] that already have a
+    /// `daily_strain_readings` row. Used by the iOS StrainFinalizer
+    /// which enumerates the range locally and skips these. Returning
+    /// what's *present* keeps all date arithmetic on the Swift side,
+    /// which has Foundation's Calendar.
+    pub fn daily_strain_dates_present(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> GooseResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date_key FROM daily_strain_readings \
+             WHERE date_key BETWEEN ?1 AND ?2 \
+             ORDER BY date_key",
+        )?;
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Trailing N-day rolling history of recovery_readings: one row per
     /// date_key, most-recent first. Drives the iOS recovery trend chart
     /// (previously fed by `metrics.recovery_score_from_features.daily`).

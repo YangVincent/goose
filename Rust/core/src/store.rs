@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 21;
+pub const CURRENT_SCHEMA_VERSION: i64 = 22;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -1828,6 +1828,33 @@ impl GooseStore {
 
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (21);
             PRAGMA user_version = 21;
+
+            -- v22: typed mirror for one-row-per-day strain readings.
+            -- Past days are finalized into this table by the iOS
+            -- StrainFinalizer (which runs on every foreground after
+            -- midnight). Today stays in-memory (live, accumulating)
+            -- via DayStrainStore.today. WhoopHomeView reads from this
+            -- table for any past day and from .today for today.
+            CREATE TABLE IF NOT EXISTS daily_strain_readings (
+                date_key TEXT PRIMARY KEY,
+                strain_score REAL NOT NULL,
+                background_strain REAL NOT NULL,
+                background_effective_kj REAL NOT NULL,
+                workout_count INTEGER NOT NULL,
+                workout_effective_kj REAL NOT NULL,
+                workout_strain_sum REAL NOT NULL,
+                sample_count INTEGER NOT NULL,
+                last_sample_at_unix_ms INTEGER,
+                reading_json TEXT NOT NULL,
+                finalized_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_daily_strain_readings_date
+                ON daily_strain_readings(date_key);
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (22);
+            PRAGMA user_version = 22;
             "#,
         )?;
         self.drop_decoded_frame_parsed_payload_json_column()?;

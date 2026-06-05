@@ -59,6 +59,7 @@ struct SleepDetailView: View {
         await importedStore.bootstrapIfNeeded(databasePath: HealthDataStore.defaultDatabasePath())
       }
       audioRecorder.reloadRecentEvents()
+      sleepSession.backfillKnownNightIfMissing()
       refreshReading()
     }
     .onChange(of: selectedDay.currentDate) { _, _ in
@@ -978,28 +979,37 @@ struct SleepDetailView: View {
     return "\(h)h\(String(format: "%02d", m))m"
   }
 
-  /// Decide which session to read against and dispatch the bridge call.
-  /// Order of preference: (1) the most recent SleepSessionStore PastSession,
-  /// (2) the auto-detected sleep window for the selected date. Falling
-  /// back to the detected window means "last night" still gets a reading
-  /// even if you went to bed without tapping Start.
+  /// A "sleep day" runs from 22:00 the previous calendar day to 22:00
+  /// of the selected day. All explicit SleepSessionStore sessions whose
+  /// `startedAt` falls in that window count as last night's sleep. The
+  /// card computes one reading over `min(start) ... max(end)` — for a
+  /// single-sleep night that's just the session, for a night-plus-nap
+  /// case it stitches them into one contiguous window (gaps land in
+  /// "awake" because there are no HR samples there). When zero sessions
+  /// are in the window, the card shows the empty state — no guessing
+  /// from raw HR.
   private func refreshReading() {
-    if let last = sleepSession.pastSessions.first {
-      loadReading(
-        sessionID: last.id.uuidString,
-        startMs: Int64((last.startedAt.timeIntervalSince1970 * 1000).rounded()),
-        endMs: Int64((last.endedAt.timeIntervalSince1970 * 1000).rounded())
-      )
-    } else if let window = sleepStore.lastNight {
-      let key = Self.dateKeyForReading(window.onset)
-      loadReading(
-        sessionID: "auto-\(key)",
-        startMs: Int64((window.onset.timeIntervalSince1970 * 1000).rounded()),
-        endMs: Int64((window.wake.timeIntervalSince1970 * 1000).rounded())
-      )
-    } else {
-      reading = nil
+    let cal = Calendar.current
+    let dayEnd = cal.date(
+      bySettingHour: 22, minute: 0, second: 0,
+      of: selectedDay.currentDate
+    ) ?? selectedDay.currentDate
+    let dayStart = dayEnd.addingTimeInterval(-24 * 3600)
+    let inWindow = sleepSession.pastSessions.filter {
+      $0.startedAt >= dayStart && $0.startedAt < dayEnd
     }
+    guard let earliest = inWindow.map(\.startedAt).min(),
+          let latest = inWindow.map(\.endedAt).max(),
+          let primary = inWindow.min(by: { $0.startedAt < $1.startedAt })
+    else {
+      reading = nil
+      return
+    }
+    loadReading(
+      sessionID: primary.id.uuidString,
+      startMs: Int64((earliest.timeIntervalSince1970 * 1000).rounded()),
+      endMs: Int64((latest.timeIntervalSince1970 * 1000).rounded())
+    )
   }
 
   private static func dateKeyForReading(_ date: Date) -> String {

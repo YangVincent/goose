@@ -2486,6 +2486,18 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(recovery_latest_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "strain.upsert_reading" => request_args::<StrainUpsertReadingArgs>(&request)
+            .and_then(strain_upsert_reading_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "strain.get_for_date" => request_args::<StrainGetForDateArgs>(&request)
+            .and_then(strain_get_for_date_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "strain.list_dates_present" => request_args::<StrainListDatesPresentArgs>(&request)
+            .and_then(strain_list_dates_present_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.compute_reading" => request_args::<SleepComputeReadingArgs>(&request)
             .and_then(sleep_compute_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -7949,6 +7961,38 @@ struct RecoveryLatestReadingArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct StrainUpsertReadingArgs {
+    database_path: String,
+    date_key: String,
+    strain_score: f64,
+    background_strain: f64,
+    background_effective_kj: f64,
+    workout_count: i64,
+    workout_effective_kj: f64,
+    workout_strain_sum: f64,
+    sample_count: i64,
+    #[serde(default)]
+    last_sample_at_unix_ms: Option<i64>,
+    /// Full DayStrain payload as a JSON string — kept opaque so the
+    /// Swift caller decides what to surface; the typed columns above
+    /// power the trend / debug queries.
+    reading_json: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StrainGetForDateArgs {
+    database_path: String,
+    date_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StrainListDatesPresentArgs {
+    database_path: String,
+    start_date: String,
+    end_date: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SwiftCacheRangeLimitArgs {
     database_path: String,
     start_time_unix_ms: i64,
@@ -8380,6 +8424,47 @@ fn recovery_get_reading_bridge(args: RecoveryGetReadingArgs) -> GooseResult<serd
     let store = open_bridge_store(&args.database_path)?;
     let recovery = store.recovery_reading_for_session(&args.session_id)?;
     serde_json::to_value(recovery).map_err(|error| GooseError::message(error.to_string()))
+}
+
+fn strain_upsert_reading_bridge(
+    args: StrainUpsertReadingArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    store.upsert_daily_strain_reading(
+        &args.date_key,
+        args.strain_score,
+        args.background_strain,
+        args.background_effective_kj,
+        args.workout_count,
+        args.workout_effective_kj,
+        args.workout_strain_sum,
+        args.sample_count,
+        args.last_sample_at_unix_ms,
+        &args.reading_json,
+    )?;
+    Ok(serde_json::json!({
+        "date_key": args.date_key,
+        "strain_score": args.strain_score,
+    }))
+}
+
+fn strain_get_for_date_bridge(
+    args: StrainGetForDateArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    match store.daily_strain_reading_for_date(&args.date_key)? {
+        Some(raw) => serde_json::from_str(&raw)
+            .map_err(|error| GooseError::message(error.to_string())),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+fn strain_list_dates_present_bridge(
+    args: StrainListDatesPresentArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let dates = store.daily_strain_dates_present(&args.start_date, &args.end_date)?;
+    Ok(serde_json::json!({ "date_keys": dates }))
 }
 
 /// Read the most-recent `recovery_readings` row plus a trailing N-day

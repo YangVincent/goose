@@ -21,10 +21,22 @@ extension HealthDataStore {
       // by sleep.compute_reading; no packet-pipeline orchestration. The
       // legacy `score_result.output.score_0_to_100` + `daily[]` shape is
       // preserved so existing UI/coach consumers don't need to change.
-      packetScoreReports["recovery"] = try bridge.request(
+      var recoveryReport = try bridge.request(
         method: "recovery.latest_reading",
         args: ["database_path": databasePath, "history_days": 30]
       )
+      // First-launch / freshly-pulled DB: no recovery_readings row yet.
+      // Kick off a compute against the auto-detected sleep window so the
+      // home screen lights up without the user having to navigate into
+      // SleepDetailView first.
+      if Self.map(recoveryReport, "score_result", "output") == nil {
+        try? ensureSleepReadingForLastNight()
+        recoveryReport = try bridge.request(
+          method: "recovery.latest_reading",
+          args: ["database_path": databasePath, "history_days": 30]
+        )
+      }
+      packetScoreReports["recovery"] = recoveryReport
       packetScoreReports["stress"] = try bridge.request(
         method: "metrics.stress_score_from_features",
         args: baseArgs.merging([
@@ -43,6 +55,41 @@ extension HealthDataStore {
     } catch {
       packetScoreStatus = "Bridge score run blocked: \(Self.shortError(error))"
     }
+  }
+
+  /// Fire sleep.compute_reading against the most recent SleepSessionStore
+  /// PastSession in the current sleep-day window (22:00 yesterday →
+  /// 22:00 today). The bridge call chains the recovery compute and
+  /// persists both, so a follow-up `recovery.latest_reading` returns
+  /// a real row instead of null.
+  ///
+  /// Called from `runPacketScores()` only when the recovery row is
+  /// missing — after the first successful compute the table has a row
+  /// and this short-circuits. No auto-detect fallback: if there are no
+  /// logged sessions in the window, the home stays empty (truthful).
+  func ensureSleepReadingForLastNight() throws {
+    SleepSessionStore.shared.backfillKnownNightIfMissing()
+    let cal = Calendar.current
+    let dayEnd = cal.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
+    let dayStart = dayEnd.addingTimeInterval(-24 * 3600)
+    let inWindow = SleepSessionStore.shared.pastSessions.filter {
+      $0.startedAt >= dayStart && $0.startedAt < dayEnd
+    }
+    guard let earliest = inWindow.map(\.startedAt).min(),
+          let latest = inWindow.map(\.endedAt).max(),
+          let primary = inWindow.min(by: { $0.startedAt < $1.startedAt })
+    else {
+      return
+    }
+    _ = try bridge.request(
+      method: "sleep.compute_reading",
+      args: [
+        "database_path": databasePath,
+        "session_id": primary.id.uuidString,
+        "start_time_unix_ms": Int64((earliest.timeIntervalSince1970 * 1000).rounded()),
+        "end_time_unix_ms": Int64((latest.timeIntervalSince1970 * 1000).rounded()),
+      ]
+    )
   }
 
   func runSleepScore() {

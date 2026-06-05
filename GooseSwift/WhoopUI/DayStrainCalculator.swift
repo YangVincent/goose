@@ -295,9 +295,23 @@ final class DayStrainStore: ObservableObject {
     // counting them as background strain treats 7 hours of low-HR sleep
     // as 7 hours of walking, which spikes strain on a rest morning.
     // Pull union from logged PastSessions overlapping the calendar day.
-    let sleepWindows: [(Date, Date)] = SleepSessionStore.shared.pastSessions
+    let loggedSleepWindows: [(Date, Date)] = SleepSessionStore.shared.pastSessions
       .filter { $0.endedAt > dayStart && $0.startedAt < dayEnd }
       .map { (max($0.startedAt, dayStart), min($0.endedAt, dayEnd)) }
+    // Fallback: if no logged sleep covers the morning of `referenceDate`,
+    // WHOOP cloud hasn't synced last night yet. Detect bedtime HR by
+    // scanning leading low-HR samples — a 2+ hour continuous run of HR
+    // ≤ (RHR_baseline + 15 bpm) starting near dayStart is sleep.
+    let coversMorning = loggedSleepWindows.contains { window in
+      window.0 <= dayStart.addingTimeInterval(2 * 3600)
+    }
+    let synthesizedSleep: [(Date, Date)] = coversMorning
+      ? []
+      : Self.detectMorningSleepFromHR(
+          samples: allSamples,
+          dayStart: dayStart
+        )
+    let sleepWindows = loggedSleepWindows + synthesizedSleep
 
     // 1. Non-workout, non-sleep HR samples. Samples inside any workout
     // window get attributed to that workout's formula; samples inside a
@@ -473,6 +487,62 @@ final class DayStrainStore: ObservableObject {
       }
       return true
     }
+  }
+
+  /// When no logged sleep window exists for the morning of `dayStart`
+  /// (e.g. WHOOP cloud hasn't synced last night yet), detect bedtime HR
+  /// directly from the leading HR samples of the day. Bedtime HR is
+  /// characterized by a long continuous run of low HR — for the user's
+  /// typical pattern, midnight→7am holds steady at 55-65 bpm.
+  ///
+  /// Algorithm: bucket samples into 10-minute windows starting at
+  /// `dayStart`. Walk forward while the bucket mean stays below the
+  /// threshold (75 bpm, well above resting HR but below any walking-
+  /// or-louder activity). Stop on the first bucket that breaks the
+  /// threshold. Return the swept range as a sleep window if it's at
+  /// least 2 hours long.
+  private static func detectMorningSleepFromHR(
+    samples: [HeartRateSamplePoint],
+    dayStart: Date
+  ) -> [(Date, Date)] {
+    let bucketSeconds: TimeInterval = 600
+    let threshold: Double = 75
+    let minDurationSeconds: TimeInterval = 2 * 3600
+    let sorted = samples
+      .filter { $0.capturedAt >= dayStart }
+      .sorted { $0.capturedAt < $1.capturedAt }
+    guard !sorted.isEmpty else { return [] }
+    // Sweep buckets starting from dayStart, stop on first non-low bucket.
+    var bucketIndex = 0
+    var lastLowEnd = dayStart
+    var i = 0
+    while i < sorted.count {
+      let bucketStart = dayStart.addingTimeInterval(Double(bucketIndex) * bucketSeconds)
+      let bucketEnd = bucketStart.addingTimeInterval(bucketSeconds)
+      var bucketSamples: [Int] = []
+      while i < sorted.count, sorted[i].capturedAt < bucketEnd {
+        if sorted[i].capturedAt >= bucketStart {
+          bucketSamples.append(sorted[i].bpm)
+        }
+        i += 1
+      }
+      if bucketSamples.isEmpty {
+        // No samples in this bucket — treat as "still sleeping" only if
+        // we haven't broken out yet (avoids extending into wake gaps).
+        bucketIndex += 1
+        continue
+      }
+      let mean = Double(bucketSamples.reduce(0, +)) / Double(bucketSamples.count)
+      if mean <= threshold {
+        lastLowEnd = bucketEnd
+        bucketIndex += 1
+      } else {
+        break
+      }
+    }
+    let duration = lastLowEnd.timeIntervalSince(dayStart)
+    guard duration >= minDurationSeconds else { return [] }
+    return [(dayStart, lastLowEnd)]
   }
 
 }

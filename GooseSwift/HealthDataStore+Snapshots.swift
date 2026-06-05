@@ -68,7 +68,7 @@ extension HealthDataStore {
   /// and this short-circuits. No auto-detect fallback: if there are no
   /// logged sessions in the window, the home stays empty (truthful).
   func ensureSleepReadingForLastNight() throws {
-    SleepSessionStore.shared.backfillKnownNightIfMissing()
+    // Legacy backfill removed — see SleepDetailView for the same fix.
     let cal = Calendar.current
     let dayEnd = cal.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
     let dayStart = dayEnd.addingTimeInterval(-24 * 3600)

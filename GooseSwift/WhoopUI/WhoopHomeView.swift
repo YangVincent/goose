@@ -134,7 +134,7 @@ struct WhoopHomeView: View {
     pastStrainByDate.removeAll()
     recoveryByDate.removeAll()
     sleepByDate.removeAll()
-    SleepSessionStore.shared.backfillKnownNightIfMissing()
+    // Legacy backfill removed — see SleepDetailView for the same fix.
     DayStrainStore.shared.refresh()
     DayStrainStore.finalizePastDaysIfNeeded()
     ensureSleepAndRecoveryForLastNight()

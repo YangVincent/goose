@@ -8491,6 +8491,12 @@ fn strain_list_dates_present_bridge(
     Ok(serde_json::json!({ "date_keys": dates }))
 }
 
+/// **Offline-only bridge method.** Backfills `imported_daily_summary`
+/// into the typed tables. Invoke from `cargo run --example
+/// whoop_migrate_smoke` against a pulled DB, then push the DB back to
+/// the device. **DO NOT** add a Swift caller that fires this on
+/// `.task` / `.onAppear` behind a UserDefaults flag — see README.md
+/// "One-off Data Migrations" and `whoop_import.rs`'s top-of-file note.
 fn whoop_migrate_to_typed_tables_bridge(
     args: WhoopMigrateArgs,
 ) -> GooseResult<serde_json::Value> {

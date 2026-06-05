@@ -117,15 +117,6 @@ struct WhoopHomeView: View {
       await importedDailyStore.bootstrapIfNeeded(
         databasePath: HealthDataStore.defaultDatabasePath()
       )
-      // Legacy cloud loads — still needed by the views that haven't been
-      // refactored to read from WhoopImportedDailyStore yet. To remove
-      // entirely once the refactor lands.
-      if importedDailyStore.dayOverview(for: selectedDay.currentDate) == nil {
-      }
-      if [].isEmpty {
-      }
-      if importedDailyStore.recoveryHistory().isEmpty {
-      }
       refreshHomeData()
     }
     .onChange(of: selectedDay.currentDate) { _, _ in

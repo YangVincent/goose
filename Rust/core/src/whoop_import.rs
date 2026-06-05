@@ -1,5 +1,18 @@
 //! WHOOP → typed-tables converters.
 //!
+//! ## DO NOT call this from iOS startup.
+//!
+//! This module is library code for an **offline migration tool**, run
+//! once by hand against a pulled DB and pushed back. See
+//! `examples/whoop_migrate_smoke.rs` for the canonical caller. The
+//! `imported_daily_summary` table is static — once we've migrated, there
+//! is no new WHOOP data to import — so any Swift caller that fires this
+//! on `.task` / `.onAppear` behind a UserDefaults "did_migrate_v1" flag
+//! is dead code that ships forever. The bridge method exposing this
+//! exists for Mac-side tools, not for the app's startup path. See
+//! README.md "One-off Data Migrations" + the user-memory
+//! `feedback_no_runtime_gates_for_static_migrations.md`.
+//!
 //! Walks `imported_daily_summary` + `external_sleep_sessions` and emits
 //! `SleepReading` / `RecoveryReading` / daily strain rows tagged with
 //! `source = "whoop.cloud"`, suitable for upserting into the same typed

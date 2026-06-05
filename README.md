@@ -121,6 +121,55 @@ xcrun devicectl device process launch \
   com.goose.swift
 ```
 
+## One-off Data Migrations — DO NOT add startup hooks
+
+For one-time migrations of **static data** (e.g. backfilling
+`imported_daily_summary` into the typed `sleep_readings` /
+`recovery_readings` / `daily_strain_readings` / `daily_vitals_readings`
+tables), run the migration **once, locally, against a pulled DB, then
+push the result back**:
+
+```sh
+# 1. Kill the app on the device so the sqlite file isn't locked.
+# 2. Pull the live DB.
+xcrun devicectl device copy from \
+  --device <device-id> \
+  --domain-type appDataContainer \
+  --domain-identifier com.vincenty.goose \
+  --source "Library/Application Support/GooseSwift/goose.sqlite" \
+  --destination /tmp/goose.sqlite
+
+# 3. Run the migration locally.
+cargo run --manifest-path Rust/core/Cargo.toml \
+  --example whoop_migrate_smoke -- /tmp/goose.sqlite
+
+# 4. Push the migrated DB back.
+xcrun devicectl device copy to \
+  --device <device-id> \
+  --domain-type appDataContainer \
+  --domain-identifier com.vincenty.goose \
+  --source /tmp/goose.sqlite \
+  --destination "Library/Application Support/GooseSwift/goose.sqlite"
+```
+
+**Do NOT** add a Swift caller that fires the migration on app launch
+behind a `UserDefaults` "did_migrate_v1" flag. The
+`imported_daily_summary` table is static — once migrated, there is no
+new data to import — so the launch-time gate is dead code that ships
+forever, and the "idempotent migration on every launch" pattern is a
+lie waiting to fail when something subtly drifts.
+
+Same rule applies to any one-shot fix to existing rows (legacy
+session_ids, orphan data cleanups, schema-shape repairs): do it once
+on a pulled DB and push back. Do not add bridge methods that the iOS
+app calls on `.task` / `.onAppear` to repair its own state.
+
+The Rust library code that powers these migrations
+(`Rust/core/src/whoop_import.rs`, the `sleep.purge_*` /
+`whoop.migrate_*` bridge methods) lives in the core for shareability
+with the `examples/` binaries — **the bridge methods exist for
+Mac-side tools, not for iOS startup calls**.
+
 ## Rust Core Bridge
 
 The Rust bridge source is committed in `Rust/core`. Do not commit built `.a`

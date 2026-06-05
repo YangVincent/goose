@@ -27,6 +27,7 @@ pub mod perf_budget;
 pub mod privacy_lint;
 pub mod property_tests;
 pub mod protocol;
+pub mod recovery_reading;
 pub mod recovery_rollup;
 pub mod reference;
 pub mod report;

@@ -1372,6 +1372,103 @@ impl GooseStore {
         }
     }
 
+    pub fn upsert_recovery_reading(
+        &self,
+        reading: &crate::recovery_reading::RecoveryReading,
+    ) -> GooseResult<()> {
+        let reading_json = serde_json::to_string(reading)
+            .map_err(|error| GooseError::message(error.to_string()))?;
+        self.conn.execute(
+            r#"
+            INSERT INTO recovery_readings (
+                session_id, date_key, algorithm_id, algorithm_version,
+                start_time_unix_ms, end_time_unix_ms,
+                recovery_score, hrv_score, rhr_score, sleep_score,
+                respiratory_score, temperature_score, prior_strain_score,
+                hrv_rmssd_ms, hrv_baseline_rmssd_ms,
+                resting_hr_bpm, resting_hr_baseline_bpm,
+                respiratory_rate_rpm, respiratory_rate_baseline_rpm,
+                skin_temp_delta_c, prior_strain_0_to_21,
+                baseline_nights_used, reading_json
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
+            )
+            ON CONFLICT(session_id) DO UPDATE SET
+                date_key = excluded.date_key,
+                algorithm_id = excluded.algorithm_id,
+                algorithm_version = excluded.algorithm_version,
+                start_time_unix_ms = excluded.start_time_unix_ms,
+                end_time_unix_ms = excluded.end_time_unix_ms,
+                recovery_score = excluded.recovery_score,
+                hrv_score = excluded.hrv_score,
+                rhr_score = excluded.rhr_score,
+                sleep_score = excluded.sleep_score,
+                respiratory_score = excluded.respiratory_score,
+                temperature_score = excluded.temperature_score,
+                prior_strain_score = excluded.prior_strain_score,
+                hrv_rmssd_ms = excluded.hrv_rmssd_ms,
+                hrv_baseline_rmssd_ms = excluded.hrv_baseline_rmssd_ms,
+                resting_hr_bpm = excluded.resting_hr_bpm,
+                resting_hr_baseline_bpm = excluded.resting_hr_baseline_bpm,
+                respiratory_rate_rpm = excluded.respiratory_rate_rpm,
+                respiratory_rate_baseline_rpm = excluded.respiratory_rate_baseline_rpm,
+                skin_temp_delta_c = excluded.skin_temp_delta_c,
+                prior_strain_0_to_21 = excluded.prior_strain_0_to_21,
+                baseline_nights_used = excluded.baseline_nights_used,
+                reading_json = excluded.reading_json,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            "#,
+            params![
+                reading.session_id,
+                reading.date_key,
+                reading.algorithm_id,
+                reading.algorithm_version,
+                reading.start_time_unix_ms,
+                reading.end_time_unix_ms,
+                reading.recovery_score,
+                reading.hrv_score,
+                reading.rhr_score,
+                reading.sleep_score,
+                reading.respiratory_score,
+                reading.temperature_score,
+                reading.prior_strain_score,
+                reading.hrv_rmssd_ms,
+                reading.hrv_baseline_rmssd_ms,
+                reading.resting_hr_bpm,
+                reading.resting_hr_baseline_bpm,
+                reading.respiratory_rate_rpm,
+                reading.respiratory_rate_baseline_rpm,
+                reading.skin_temp_delta_c,
+                reading.prior_strain_0_to_21,
+                reading.baseline_nights_used,
+                reading_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn recovery_reading_for_session(
+        &self,
+        session_id: &str,
+    ) -> GooseResult<Option<crate::recovery_reading::RecoveryReading>> {
+        use rusqlite::OptionalExtension;
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT reading_json FROM recovery_readings WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match raw {
+            None => Ok(None),
+            Some(text) => serde_json::from_str(&text)
+                .map(Some)
+                .map_err(|error| GooseError::message(error.to_string())),
+        }
+    }
+
     /// One row per STRAP_CONDITION_REPORT (~every 10 minutes) covering the
     /// requested window. Callers use this to derive worn intervals: each
     /// pair of consecutive same-value rows defines a confirmed worn/off

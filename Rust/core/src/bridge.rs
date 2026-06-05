@@ -2549,6 +2549,14 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(swift_caches_append_sleep_audio_event_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "recovery.compute_from_sleep_reading" => request_args::<RecoveryComputeFromSleepReadingArgs>(&request)
+            .and_then(recovery_compute_from_sleep_reading_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "recovery.get_reading" => request_args::<RecoveryGetReadingArgs>(&request)
+            .and_then(recovery_get_reading_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.compute_reading" => request_args::<SleepComputeReadingArgs>(&request)
             .and_then(sleep_compute_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -8068,6 +8076,23 @@ struct SleepGetReadingArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct RecoveryComputeFromSleepReadingArgs {
+    database_path: String,
+    session_id: String,
+    /// If set, override the sleep_reading -> recovery_reading default
+    /// baseline window. The Swift app does not currently set this; it's
+    /// here so tests can shrink the lookback.
+    #[serde(default)]
+    baseline_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RecoveryGetReadingArgs {
+    database_path: String,
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SwiftCacheRangeLimitArgs {
     database_path: String,
     start_time_unix_ms: i64,
@@ -8428,13 +8453,77 @@ fn sleep_compute_reading_bridge(args: SleepComputeReadingArgs) -> GooseResult<se
         options,
     )?;
     store.upsert_sleep_reading(&reading)?;
-    serde_json::to_value(&reading).map_err(|error| GooseError::message(error.to_string()))
+
+    // Chain a recovery reading off the same sleep reading. The two
+    // pieces are observed together in the UI, so computing in lock-step
+    // means callers never have to fire two requests. A failure here
+    // shouldn't bubble up and undo the sleep write — surface as
+    // `recovery_error` in the response instead.
+    let recovery_value: serde_json::Value =
+        match crate::recovery_reading::compute_recovery_from_sleep_reading(
+            &store.conn,
+            &reading,
+            crate::recovery_reading::RecoveryReadingOptions::default(),
+        ) {
+            Ok(rec) => {
+                let _ = store.upsert_recovery_reading(&rec);
+                serde_json::to_value(&rec)
+                    .map_err(|error| GooseError::message(error.to_string()))?
+            }
+            Err(error) => serde_json::json!({ "error": error.to_string() }),
+        };
+
+    let mut value = serde_json::to_value(&reading)
+        .map_err(|error| GooseError::message(error.to_string()))?;
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert("recovery_reading".to_string(), recovery_value);
+    }
+    Ok(value)
 }
 
 fn sleep_get_reading_bridge(args: SleepGetReadingArgs) -> GooseResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let reading = store.sleep_reading_for_session(&args.session_id)?;
-    serde_json::to_value(reading).map_err(|error| GooseError::message(error.to_string()))
+    let recovery = store.recovery_reading_for_session(&args.session_id)?;
+    let mut value = serde_json::to_value(reading)
+        .map_err(|error| GooseError::message(error.to_string()))?;
+    if let serde_json::Value::Object(ref mut map) = value {
+        let rec = serde_json::to_value(recovery)
+            .map_err(|error| GooseError::message(error.to_string()))?;
+        map.insert("recovery_reading".to_string(), rec);
+    }
+    Ok(value)
+}
+
+fn recovery_compute_from_sleep_reading_bridge(
+    args: RecoveryComputeFromSleepReadingArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let sleep_reading = store
+        .sleep_reading_for_session(&args.session_id)?
+        .ok_or_else(|| {
+            GooseError::message(format!(
+                "no sleep_reading row for session_id={}",
+                args.session_id
+            ))
+        })?;
+    let mut options = crate::recovery_reading::RecoveryReadingOptions::default();
+    if let Some(days) = args.baseline_days {
+        options.baseline_days = days;
+    }
+    let recovery = crate::recovery_reading::compute_recovery_from_sleep_reading(
+        &store.conn,
+        &sleep_reading,
+        options,
+    )?;
+    store.upsert_recovery_reading(&recovery)?;
+    serde_json::to_value(&recovery).map_err(|error| GooseError::message(error.to_string()))
+}
+
+fn recovery_get_reading_bridge(args: RecoveryGetReadingArgs) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let recovery = store.recovery_reading_for_session(&args.session_id)?;
+    serde_json::to_value(recovery).map_err(|error| GooseError::message(error.to_string()))
 }
 
 fn swift_caches_list_sleep_audio_events_bridge(

@@ -29,6 +29,7 @@ struct SleepDetailView: View {
           VStack(alignment: .leading, spacing: 20) {
             hero
             sleepReadingCard
+            recoveryReadingCard
             stageHypnogram
             stageBreakdownCard
             needVsActualCard
@@ -871,6 +872,99 @@ struct SleepDetailView: View {
     }
   }
 
+  // MARK: - Recovery reading (Rust goose_recovery_v0)
+
+  /// Recovery card. Lives right under the sleep card because they're
+  /// computed from the same sleep window: HRV 35% + RHR 20% + Sleep 15% +
+  /// Respiratory 10% + Temperature 10% + Prior strain 10%. Respiratory
+  /// + temperature are neutralized to baseline until we wire local
+  /// estimators for them — that's the `respiratory_temperature_neutralized`
+  /// flag the bridge returns.
+  @ViewBuilder
+  private var recoveryReadingCard: some View {
+    cardSurface {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 6) {
+          Text("RECOVERY")
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .tracking(2)
+            .foregroundStyle(.white.opacity(0.55))
+          sourceTag("FROM SLEEP", color: Self.greenAccent)
+          Spacer()
+        }
+        if let rec = reading?.recovery {
+          recoveryBody(rec)
+        } else if reading != nil {
+          Text("Couldn't compute recovery — need at least an HRV baseline. Wear the strap a few more nights and it'll fill in.")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.45))
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          Text("Recovery appears once a sleep reading is available.")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.4))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func recoveryBody(_ r: RecoveryReadingSnapshot) -> some View {
+    HStack(alignment: .lastTextBaseline, spacing: 6) {
+      Text(String(format: "%.0f", r.recoveryScore))
+        .font(.system(size: 52, weight: .heavy, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(scoreColor(r.recoveryScore))
+      Text("/ 100")
+        .font(.system(size: 16, weight: .heavy, design: .rounded))
+        .foregroundStyle(.white.opacity(0.45))
+      Spacer()
+      Text(recoveryZoneLabel(r.recoveryScore))
+        .font(.system(size: 10, weight: .heavy, design: .rounded))
+        .tracking(1.5)
+        .foregroundStyle(scoreColor(r.recoveryScore))
+    }
+    LazyVGrid(columns: [
+      GridItem(.flexible(), alignment: .leading),
+      GridItem(.flexible(), alignment: .leading),
+      GridItem(.flexible(), alignment: .leading),
+    ], spacing: 10) {
+      subscoreCell("HRV (35%)", r.hrvScore)
+      subscoreCell("RHR (20%)", r.rhrScore)
+      subscoreCell("SLEEP (15%)", r.sleepScore)
+      subscoreCell("RESP (10%)", r.respiratoryScore)
+      subscoreCell("TEMP (10%)", r.temperatureScore)
+      subscoreCell("STRAIN (10%)", r.priorStrainScore)
+    }
+    Divider().overlay(Color.white.opacity(0.1))
+    HStack(spacing: 14) {
+      kvCell(
+        label: "HRV",
+        value: String(format: "%.0f / %.0f ms", r.hrvRmssdMs, r.hrvBaselineRmssdMs)
+      )
+      kvCell(
+        label: "RHR",
+        value: String(format: "%.0f / %.0f bpm", r.restingHrBpm, r.restingHrBaselineBpm)
+      )
+      kvCell(label: "PRIOR STRAIN", value: String(format: "%.1f", r.priorStrain))
+      kvCell(label: "BASELINE", value: "\(r.baselineNightsUsed) nights")
+      Spacer(minLength: 0)
+    }
+    if r.qualityFlags.contains("respiratory_temperature_neutralized") {
+      Text("Respiratory rate and skin temperature are neutralized to baseline (full credit) until those are computed locally — they account for 20% of the score.")
+        .font(.system(size: 9, weight: .semibold, design: .rounded))
+        .foregroundStyle(.white.opacity(0.4))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func recoveryZoneLabel(_ v: Double) -> String {
+    if v >= 67 { return "GREEN" }
+    if v >= 34 { return "YELLOW" }
+    return "RED"
+  }
+
   private func scoreColor(_ v: Double) -> Color {
     if v >= 85 { return Self.greenAccent }
     if v >= 70 { return Self.yellowAccent }
@@ -1268,6 +1362,7 @@ struct SleepReadingSnapshot: Equatable {
   let wakeAfterSleepOnsetMinutes: Int
   let hrMeanBpm: Double?
   let hrvMeanRmssdMs: Double
+  let recovery: RecoveryReadingSnapshot?
 
   static func from(bridgeResponse dict: [String: Any]) -> SleepReadingSnapshot? {
     // sleep.get_reading returns serde_json(None) = NSNull when there's
@@ -1275,6 +1370,8 @@ struct SleepReadingSnapshot: Equatable {
     // OR with explicit `"is_null": true`. Either way, treat absence of
     // sleep_score as "no reading".
     guard let score = Self.double(dict["sleep_score"]) else { return nil }
+    let recovery = (dict["recovery_reading"] as? [String: Any])
+      .flatMap(RecoveryReadingSnapshot.from(bridgeResponse:))
     return SleepReadingSnapshot(
       sleepScore: score,
       durationScore: Self.double(dict["duration_score"]) ?? 0,
@@ -1291,20 +1388,62 @@ struct SleepReadingSnapshot: Equatable {
       onsetLatencyMinutes: Self.int(dict["onset_latency_minutes"]),
       wakeAfterSleepOnsetMinutes: Self.int(dict["wake_after_sleep_onset_minutes"]) ?? 0,
       hrMeanBpm: Self.double(dict["hr_mean_bpm"]),
-      hrvMeanRmssdMs: Self.double(dict["hrv_mean_rmssd_ms"]) ?? 0
+      hrvMeanRmssdMs: Self.double(dict["hrv_mean_rmssd_ms"]) ?? 0,
+      recovery: recovery
     )
   }
 
-  private static func double(_ v: Any?) -> Double? {
+  fileprivate static func double(_ v: Any?) -> Double? {
     if let d = v as? Double { return d }
     if let n = v as? NSNumber { return n.doubleValue }
     if let i = v as? Int { return Double(i) }
     return nil
   }
-  private static func int(_ v: Any?) -> Int? {
+  fileprivate static func int(_ v: Any?) -> Int? {
     if let i = v as? Int { return i }
     if let n = v as? NSNumber { return n.intValue }
     if let d = v as? Double { return Int(d) }
     return nil
+  }
+}
+
+/// Strongly-typed view of the `recovery_reading` block nested in the
+/// sleep bridge response. The Rust `sleep.compute_reading` chains a
+/// recovery compute so a single bridge call returns both. Nil here means
+/// recovery isn't computable yet (missing HRV samples, no baseline).
+struct RecoveryReadingSnapshot: Equatable {
+  let recoveryScore: Double
+  let hrvScore: Double
+  let rhrScore: Double
+  let sleepScore: Double
+  let respiratoryScore: Double
+  let temperatureScore: Double
+  let priorStrainScore: Double
+  let hrvRmssdMs: Double
+  let hrvBaselineRmssdMs: Double
+  let restingHrBpm: Double
+  let restingHrBaselineBpm: Double
+  let priorStrain: Double
+  let baselineNightsUsed: Int
+  let qualityFlags: [String]
+
+  static func from(bridgeResponse dict: [String: Any]) -> RecoveryReadingSnapshot? {
+    guard let score = SleepReadingSnapshot.double(dict["recovery_score"]) else { return nil }
+    return RecoveryReadingSnapshot(
+      recoveryScore: score,
+      hrvScore: SleepReadingSnapshot.double(dict["hrv_score"]) ?? 0,
+      rhrScore: SleepReadingSnapshot.double(dict["rhr_score"]) ?? 0,
+      sleepScore: SleepReadingSnapshot.double(dict["sleep_score"]) ?? 0,
+      respiratoryScore: SleepReadingSnapshot.double(dict["respiratory_score"]) ?? 0,
+      temperatureScore: SleepReadingSnapshot.double(dict["temperature_score"]) ?? 0,
+      priorStrainScore: SleepReadingSnapshot.double(dict["prior_strain_score"]) ?? 0,
+      hrvRmssdMs: SleepReadingSnapshot.double(dict["hrv_rmssd_ms"]) ?? 0,
+      hrvBaselineRmssdMs: SleepReadingSnapshot.double(dict["hrv_baseline_rmssd_ms"]) ?? 0,
+      restingHrBpm: SleepReadingSnapshot.double(dict["resting_hr_bpm"]) ?? 0,
+      restingHrBaselineBpm: SleepReadingSnapshot.double(dict["resting_hr_baseline_bpm"]) ?? 0,
+      priorStrain: SleepReadingSnapshot.double(dict["prior_strain_0_to_21"]) ?? 0,
+      baselineNightsUsed: SleepReadingSnapshot.int(dict["baseline_nights_used"]) ?? 0,
+      qualityFlags: (dict["quality_flags"] as? [String]) ?? []
+    )
   }
 }

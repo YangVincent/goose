@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 20;
+pub const CURRENT_SCHEMA_VERSION: i64 = 21;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -1791,6 +1791,43 @@ impl GooseStore {
 
             INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (20);
             PRAGMA user_version = 20;
+
+            -- v21: typed mirror for recovery readings, keyed by the same
+            -- sleep session_id as sleep_readings. recovery.compute_from_sleep_reading
+            -- writes here right after sleep.compute_reading lands; one
+            -- row per night.
+            CREATE TABLE IF NOT EXISTS recovery_readings (
+                session_id TEXT PRIMARY KEY,
+                date_key TEXT NOT NULL,
+                algorithm_id TEXT NOT NULL,
+                algorithm_version TEXT NOT NULL,
+                start_time_unix_ms INTEGER NOT NULL,
+                end_time_unix_ms INTEGER NOT NULL,
+                recovery_score REAL NOT NULL,
+                hrv_score REAL NOT NULL,
+                rhr_score REAL NOT NULL,
+                sleep_score REAL NOT NULL,
+                respiratory_score REAL NOT NULL,
+                temperature_score REAL NOT NULL,
+                prior_strain_score REAL NOT NULL,
+                hrv_rmssd_ms REAL NOT NULL,
+                hrv_baseline_rmssd_ms REAL NOT NULL,
+                resting_hr_bpm REAL NOT NULL,
+                resting_hr_baseline_bpm REAL NOT NULL,
+                respiratory_rate_rpm REAL NOT NULL,
+                respiratory_rate_baseline_rpm REAL NOT NULL,
+                skin_temp_delta_c REAL NOT NULL,
+                prior_strain_0_to_21 REAL NOT NULL,
+                baseline_nights_used INTEGER NOT NULL,
+                reading_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_recovery_readings_date
+                ON recovery_readings(date_key);
+
+            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (21);
+            PRAGMA user_version = 21;
             "#,
         )?;
         self.drop_decoded_frame_parsed_payload_json_column()?;

@@ -200,6 +200,7 @@ fn parses_history_packet_stable_header_and_hr_marker() {
                 spo2_pct: None,
                 rr_interval_ms: None,
                 accel_gravity: None,
+                skin_temp_raw: None,
             }),
             warnings: Vec::new(),
         })
@@ -233,6 +234,7 @@ fn normal_history_zero_hr_marker_is_not_treated_as_hr_present() {
                     spo2_pct: None,
                     rr_interval_ms: None,
                     accel_gravity: None,
+                    skin_temp_raw: None,
                 })
             );
         }
@@ -519,6 +521,7 @@ fn short_data_packets_preserve_raw_body_and_warn() {
                 spo2_pct: None,
                 rr_interval_ms: None,
                 accel_gravity: None,
+                skin_temp_raw: None,
             }),
             warnings: vec![
                 "data_packet_header_too_short".to_string(),

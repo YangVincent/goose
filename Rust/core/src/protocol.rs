@@ -146,14 +146,18 @@ pub enum DataPacketBodySummary {
         /// K-versions in this family (7, 9), the byte is a presence marker;
         /// the BPM lives elsewhere and we don't extract it yet.
         heart_rate_bpm: Option<u8>,
-        /// Empirically RE'd from the user's strap firmware: K18 packets
-        /// carry the gravity vector at body offset 24-35 (3 × f32 LE).
-        /// SpO₂ and RR are NOT present in this K18 variant — the bytes the
-        /// OpenWhoop V18 parser claims for them are flag/status fields,
-        /// not biometric values. Kept as Option for future variants.
+        /// Empirically RE'd from 777 K18 frames on the user's firmware:
+        ///   payload[24..36]   gravity vector (3 × f32 LE)
+        ///   payload[65..67]   skin temperature raw u16 LE (°C = raw/100)
+        ///   payload[108..110] daily SpO2 × 2 u16 LE (only 2 unique values
+        ///                     across the night — the day's headline number,
+        ///                     not per-minute SpO2). Per-minute SpO2 offset
+        ///                     not yet located.
+        ///   RR not yet located.
         spo2_pct: Option<u8>,
         rr_interval_ms: Option<u16>,
         accel_gravity: Option<[f32; 3]>,
+        skin_temp_raw: Option<u16>,
     },
     R17OpticalOrLabradorFiltered {
         flags: Option<u16>,
@@ -644,10 +648,10 @@ fn parse_data_packet_body_summary(
         12 | 24 => parse_k12_k24_body_summary(payload),
         26 => parse_k26_pulse_information_body_summary(payload),
         7 | 9 | 18 => {
-            let (spo2_pct, rr_interval_ms, accel_gravity) = if packet_k == 18 {
+            let (spo2_pct, rr_interval_ms, accel_gravity, skin_temp_raw) = if packet_k == 18 {
                 extract_k18_extended_fields(payload)
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
             (
                 Some(DataPacketBodySummary::NormalHistory {
@@ -661,6 +665,7 @@ fn parse_data_packet_body_summary(
                     spo2_pct,
                     rr_interval_ms,
                     accel_gravity,
+                    skin_temp_raw,
                 }),
                 Vec::new(),
             )
@@ -1019,22 +1024,56 @@ fn parse_k26_pulse_information_body_summary(
 
 fn extract_k18_extended_fields(
     payload: &[u8],
-) -> (Option<u8>, Option<u16>, Option<[f32; 3]>) {
-    // Empirically RE'd from 777 real K18 packets:
-    //   payload[24..36] = accelerometer gravity vector (3 × f32 LE), |g|≈1
+) -> (Option<u8>, Option<u16>, Option<[f32; 3]>, Option<u16>) {
+    // Empirically RE'd against the user's strap firmware. Inputs: 777 K18
+    // historical frames from 2026-06-03 cross-referenced with the
+    // WHOOP-reported daily SpO2 (94.96%) and skin temperature (33.29°C)
+    // for that night.
     //
-    // SpO2/RR caveat: OpenWhoop's recent K18 parser
+    //   payload[24..36]  — accelerometer gravity vector (3 × f32 LE), |g|≈1
+    //   payload[65..67]  — skin temperature raw, u16 LE; °C = raw / 100.0
+    //                      (over 777 frames: mean 33.16°C, range 30.7-37.2,
+    //                      drops mid-sleep, rises towards wake — matches
+    //                      physiology and WHOOP's reported 33.29°C within
+    //                      0.13°C)
+    //   payload[108..110] — daily-reported SpO2 percent × 2, u16 LE.
+    //                       Only 2 unique values across the night (191 or
+    //                       192 = 95.5% / 96.0%); WHOOP reported 94.96.
+    //                       This is the day's headline number, NOT per-
+    //                       minute SpO2. A full per-byte/per-u16 sweep of
+    //                       offsets 0..110 with HR-correlation and time-
+    //                       series shape checks found no other plausible
+    //                       SpO2 channel — every byte with mean in the
+    //                       88-99 range was either a frame counter
+    //                       (byte[8] monotonically increases), a constant,
+    //                       or a wide-range gravity float component.
+    //                       Consistent with WHOOP only storing daily SpO2
+    //                       in cloud: per-minute SpO2 is computed server-
+    //                       side from K=26 PPG samples, not transmitted
+    //                       in K=18.
+    //
+    // OpenWhoop's K18 parser
     // (github.com/bWanShiTong/openwhoop, whoop_data.rs:366-411) extracts
-    // SpO2 at their `data[48]` = our `payload[51]` for WHOOP 5.0 / Maverick.
-    // BUT — sampling 50 of the user's K18 frames shows payload[51] takes
-    // only 2 unique values (119 and 125) across that window, which is
-    // constant-ish status data, not a varying biometric. None of the
-    // other varying bytes in our user's K18 payloads look like a clean
-    // SpO2 signal (90-100 range during sleep). Either OpenWhoop's RE is
-    // for a different firmware revision, or the SpO2 byte moved on the
-    // user's strap. Leave None until firmware-specific RE confirms the
-    // real offset for this device.
-    let spo2_pct: Option<u8> = None;
+    // SpO2 at their `data[48]` = our `payload[51]`. On the user's
+    // firmware payload[51] is near-constant (119 or 125) — likely a
+    // different revision. We use the firmware-specific offsets above.
+    let spo2_pct: Option<u8> = read_u16_le(payload, 108).and_then(|raw| {
+        let pct = (raw as f32) / 2.0;
+        if (50.0..=100.0).contains(&pct) {
+            Some(pct.round() as u8)
+        } else {
+            None
+        }
+    });
+    let skin_temp_raw: Option<u16> = read_u16_le(payload, 65).and_then(|raw| {
+        // °C = raw / 100. Sanity-clamp anything outside 25-45°C.
+        let c = (raw as f32) / 100.0;
+        if (25.0..=45.0).contains(&c) {
+            Some(raw)
+        } else {
+            None
+        }
+    });
     let rr_interval_ms: Option<u16> = None;
 
     let accel_gravity = if payload.len() >= 36 {
@@ -1067,7 +1106,7 @@ fn extract_k18_extended_fields(
         None
     };
 
-    (spo2_pct, rr_interval_ms, accel_gravity)
+    (spo2_pct, rr_interval_ms, accel_gravity, skin_temp_raw)
 }
 
 /// For K18 packets the byte at hr_marker_offset is the BPM value directly

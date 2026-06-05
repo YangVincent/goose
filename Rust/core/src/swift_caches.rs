@@ -1720,18 +1720,7 @@ impl GooseStore {
                 report.frames_skipped_other_body += 1;
                 continue;
             };
-            let DataPacketBodySummary::RawSensorHistory {
-                heart_rate_bpm,
-                rr_intervals_ms,
-                sensor_data: Some(sd),
-                ..
-            } = body
-            else {
-                report.frames_skipped_other_body += 1;
-                continue;
-            };
-            // Convert ISO-8601 captured_at to unix ms. SQLite's strftime
-            // can do this server-side cleanly.
+            // Convert ISO-8601 captured_at to unix ms once, up front.
             let captured_at_ms: i64 = self
                 .conn
                 .query_row(
@@ -1745,45 +1734,98 @@ impl GooseStore {
                 report.frames_no_timestamp += 1;
                 continue;
             }
-            let sample_id = format!(
-                "promoted.{}.{}.rust.k12_k24",
-                captured_at_ms, frame_id
-            );
-            let bpm = heart_rate_bpm.map(i64::from);
-            let rr_json: Option<String> = if rr_intervals_ms.is_empty() {
-                None
-            } else {
-                let v: Vec<i64> = rr_intervals_ms.iter().map(|x| *x as i64).collect();
-                Some(serde_json::to_string(&v).unwrap_or_default())
-            };
-            let changed = self.conn.execute(
-                "INSERT OR IGNORE INTO sensor_samples ( \
-                     sample_id, captured_at_ms, source, bpm, rr_intervals_ms, \
-                     ppg_green, ppg_red_ir, spo2_red, spo2_ir, \
-                     skin_temp_raw, ambient_light, \
-                     led_drive_1, led_drive_2, signal_quality, skin_contact \
-                 ) VALUES (?1, ?2, 'rust.k12_k24', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                params![
-                    sample_id,
-                    captured_at_ms,
-                    bpm,
-                    rr_json,
-                    i64::from(sd.ppg_green),
-                    i64::from(sd.ppg_red_ir),
-                    i64::from(sd.spo2_red),
-                    i64::from(sd.spo2_ir),
-                    i64::from(sd.skin_temp_raw),
-                    i64::from(sd.ambient_light),
-                    i64::from(sd.led_drive_1),
-                    i64::from(sd.led_drive_2),
-                    i64::from(sd.signal_quality),
-                    i64::from(sd.skin_contact),
-                ],
-            )?;
-            if changed > 0 {
-                report.samples_inserted += 1;
-            } else {
-                report.samples_already_present += 1;
+
+            match body {
+                DataPacketBodySummary::RawSensorHistory {
+                    heart_rate_bpm,
+                    rr_intervals_ms,
+                    sensor_data: Some(sd),
+                    ..
+                } => {
+                    let sample_id = format!(
+                        "promoted.{}.{}.rust.k12_k24",
+                        captured_at_ms, frame_id
+                    );
+                    let bpm = heart_rate_bpm.map(i64::from);
+                    let rr_json: Option<String> = if rr_intervals_ms.is_empty() {
+                        None
+                    } else {
+                        let v: Vec<i64> = rr_intervals_ms.iter().map(|x| *x as i64).collect();
+                        Some(serde_json::to_string(&v).unwrap_or_default())
+                    };
+                    let changed = self.conn.execute(
+                        "INSERT OR IGNORE INTO sensor_samples ( \
+                             sample_id, captured_at_ms, source, bpm, rr_intervals_ms, \
+                             ppg_green, ppg_red_ir, spo2_red, spo2_ir, \
+                             skin_temp_raw, ambient_light, \
+                             led_drive_1, led_drive_2, signal_quality, skin_contact \
+                         ) VALUES (?1, ?2, 'rust.k12_k24', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                        params![
+                            sample_id,
+                            captured_at_ms,
+                            bpm,
+                            rr_json,
+                            i64::from(sd.ppg_green),
+                            i64::from(sd.ppg_red_ir),
+                            i64::from(sd.spo2_red),
+                            i64::from(sd.spo2_ir),
+                            i64::from(sd.skin_temp_raw),
+                            i64::from(sd.ambient_light),
+                            i64::from(sd.led_drive_1),
+                            i64::from(sd.led_drive_2),
+                            i64::from(sd.signal_quality),
+                            i64::from(sd.skin_contact),
+                        ],
+                    )?;
+                    if changed > 0 {
+                        report.samples_inserted += 1;
+                    } else {
+                        report.samples_already_present += 1;
+                    }
+                }
+                DataPacketBodySummary::NormalHistory {
+                    heart_rate_bpm,
+                    spo2_pct,
+                    skin_temp_raw,
+                    accel_gravity,
+                    ..
+                } => {
+                    // K18 (Maverick) historical: BPM + day-headline SpO2 +
+                    // skin_temp + gravity. PPG/SpO2 ADC channels aren't
+                    // carried by this packet variant on the user's firmware.
+                    let sample_id = format!(
+                        "promoted.{}.{}.rust.k18",
+                        captured_at_ms, frame_id
+                    );
+                    let bpm = heart_rate_bpm.map(i64::from);
+                    let spo2 = spo2_pct.map(i64::from);
+                    let skin_temp = skin_temp_raw.map(i64::from);
+                    let gravity_json: Option<String> = accel_gravity
+                        .map(|g| serde_json::to_string(&g).unwrap_or_default());
+                    let changed = self.conn.execute(
+                        "INSERT OR IGNORE INTO sensor_samples ( \
+                             sample_id, captured_at_ms, source, bpm, \
+                             spo2_pct, skin_temp_raw, accel_gravity \
+                         ) VALUES (?1, ?2, 'rust.k18', ?3, ?4, ?5, ?6)",
+                        params![
+                            sample_id,
+                            captured_at_ms,
+                            bpm,
+                            spo2,
+                            skin_temp,
+                            gravity_json,
+                        ],
+                    )?;
+                    if changed > 0 {
+                        report.samples_inserted += 1;
+                    } else {
+                        report.samples_already_present += 1;
+                    }
+                }
+                _ => {
+                    report.frames_skipped_other_body += 1;
+                    continue;
+                }
             }
         }
         Ok(report)

@@ -7933,8 +7933,6 @@ struct SleepComputeReadingArgs {
     start_time_unix_ms: i64,
     end_time_unix_ms: i64,
     #[serde(default)]
-    resting_bpm: Option<i64>,
-    #[serde(default)]
     hrv_baseline_ms: Option<f64>,
     #[serde(default)]
     need_hours: Option<f64>,
@@ -8381,7 +8379,6 @@ fn sleep_compute_reading_bridge(args: SleepComputeReadingArgs) -> GooseResult<se
     let store = open_bridge_store(&args.database_path)?;
     let defaults = crate::sleep_reading::SleepReadingOptions::default();
     let options = crate::sleep_reading::SleepReadingOptions {
-        resting_bpm: args.resting_bpm.unwrap_or(defaults.resting_bpm),
         hrv_baseline_ms: args.hrv_baseline_ms.unwrap_or(defaults.hrv_baseline_ms),
         need_hours: args.need_hours.unwrap_or(defaults.need_hours),
     };

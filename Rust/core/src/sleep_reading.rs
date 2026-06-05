@@ -25,13 +25,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{GooseError, GooseResult};
 
-pub const DEFAULT_RESTING_BPM: i64 = 49;
 pub const DEFAULT_HRV_BASELINE_MS: f64 = 50.0;
 pub const DEFAULT_NEED_HOURS: f64 = 7.5;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SleepReadingOptions {
-    pub resting_bpm: i64,
     pub hrv_baseline_ms: f64,
     pub need_hours: f64,
 }
@@ -39,7 +37,6 @@ pub struct SleepReadingOptions {
 impl Default for SleepReadingOptions {
     fn default() -> Self {
         Self {
-            resting_bpm: DEFAULT_RESTING_BPM,
             hrv_baseline_ms: DEFAULT_HRV_BASELINE_MS,
             need_hours: DEFAULT_NEED_HOURS,
         }
@@ -104,6 +101,9 @@ pub struct SleepReading {
     pub hrv_score: f64,
     pub restfulness_score: f64,
     pub sleep_score: f64,
+    /// Resting BPM observed for this specific night — the 10th percentile
+    /// of per-minute hr_mean over the window. Surfaced so the UI can
+    /// show "tonight's RHR was 56" without re-deriving. Not an input.
     pub resting_bpm_used: i64,
     pub hrv_baseline_ms_used: f64,
     pub need_hours: f64,
@@ -253,7 +253,22 @@ fn build_minute_series(
     Ok(rows)
 }
 
-fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> f64 {
+struct ClassifyOutputs {
+    observed_resting: f64,
+}
+
+/// Percentile of per-minute hr_mean used to derive the night's resting
+/// baseline. 10th percentile = the user's actual low for the window,
+/// which is what defines real sleep heart rate.
+const RESTING_PERCENTILE: f64 = 0.10;
+
+/// Permissive fallback resting HR used only when the window has zero
+/// HR samples at all. Picked low enough that any positive HR reading
+/// still has a chance of classifying as Light or Deep rather than
+/// being silently dropped.
+const RESTING_FALLBACK_BPM: f64 = 40.0;
+
+fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> ClassifyOutputs {
     let mut nonzero_moves: Vec<f64> =
         rows.iter().map(|r| r.movement).filter(|m| *m > 0.0).collect();
     nonzero_moves.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -268,17 +283,31 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> f64 {
     } else {
         nonzero_moves[nonzero_moves.len() / 2]
     };
-    let rmssd_vals: Vec<f64> = rows.iter().filter_map(|r| r.rmssd).collect();
-    let rmssd_window_mean = if rmssd_vals.is_empty() {
-        options.hrv_baseline_ms
+    // Resting baseline is always derived from the nightly data itself.
+    // No caller-supplied RHR — that anchored the thresholds to a stale
+    // or wrong value (default 49 → asleep ≤ 52, awake ≥ 59, which
+    // classified typical sleep HR of 55-65 entirely as Awake). The
+    // bottom decile of per-minute hr_mean is the user's actual low for
+    // this specific night and tracks real-day drift (illness, alcohol,
+    // training load) automatically.
+    let mut hr_means_sorted: Vec<f64> =
+        rows.iter().filter_map(|r| r.hr_mean).collect();
+    hr_means_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let observed_resting = if hr_means_sorted.is_empty() {
+        RESTING_FALLBACK_BPM
     } else {
-        rmssd_vals.iter().sum::<f64>() / rmssd_vals.len() as f64
+        let idx = (hr_means_sorted.len() as f64 * RESTING_PERCENTILE) as usize;
+        hr_means_sorted[idx.min(hr_means_sorted.len() - 1)]
     };
+    // hrv_baseline_ms is consumed elsewhere (linear_score for hrv_score);
+    // keep options live so the signature documents the dependency, but no
+    // per-classify state is derived from it inside this function.
+    let _ = options.hrv_baseline_ms;
 
-    // Deep-sleep HR cap kept at resting+3 (original). The RMSSD gate
-    // below was the wrong knob; HR alone is restrictive enough.
-    let asleep_threshold = options.resting_bpm as f64 + 3.0;
-    let awake_threshold = options.resting_bpm as f64 + 10.0;
+    // Deep-sleep HR cap kept at resting+3. The RMSSD gate previously
+    // here was the wrong knob; HR alone is restrictive enough.
+    let asleep_threshold = observed_resting + 3.0;
+    let awake_threshold = observed_resting + 10.0;
 
     for row in rows.iter_mut() {
         let Some(hr_mean) = row.hr_mean else {
@@ -301,7 +330,7 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> f64 {
             row.stage = Stage::Light;
         }
     }
-    rmssd_window_mean
+    ClassifyOutputs { observed_resting }
 }
 
 fn first_sleep_onset_minutes(rows: &[MinuteRow]) -> Option<i64> {
@@ -343,7 +372,7 @@ pub fn compute_sleep_reading(
         ));
     }
     let mut rows = build_minute_series(conn, start_ms, end_ms)?;
-    let _ = classify_rows(&mut rows, options);
+    let classify = classify_rows(&mut rows, options);
 
     let tib_min = rows.len() as i64;
     if tib_min == 0 {
@@ -451,7 +480,7 @@ pub fn compute_sleep_reading(
         hrv_score: round1(hrv_score),
         restfulness_score: round1(restfulness_score),
         sleep_score: round1(sleep_score),
-        resting_bpm_used: options.resting_bpm,
+        resting_bpm_used: classify.observed_resting.round() as i64,
         hrv_baseline_ms_used: options.hrv_baseline_ms,
         need_hours: options.need_hours,
     })

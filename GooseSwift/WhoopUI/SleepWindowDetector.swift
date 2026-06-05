@@ -140,16 +140,43 @@ final class SleepWindowStore: ObservableObject {
   @Published private(set) var lastNight: SleepWindowDetector.DetectedWindow?
   @Published private(set) var referenceDate: Date = Date()
 
-  /// Refresh the detected window relative to `wakeReference` (defaults to now).
-  /// Pass `SelectedDayStore.shared.currentDate.endOfDay()` to compute a historical night.
+  /// Rebuild `lastNight` from the most recent SleepSessionStore
+  /// PastSession in the 22:00-to-22:00 sleep day ending on
+  /// `wakeReference`. **No HR-based auto-detection** — the user starts
+  /// and ends sleep explicitly. The store's `lastNight` exists only as
+  /// a presentation adapter onto whatever PastSession the user logged,
+  /// so existing consumers (WhoopSleepEnvironmentCard,
+  /// SleepStageEstimator window range, etc.) keep working without an
+  /// API change.
   func refresh(wakeReference: Date = Date()) {
     referenceDate = wakeReference
+    let cal = Calendar.current
+    let dayEnd = cal.date(bySettingHour: 22, minute: 0, second: 0, of: wakeReference) ?? wakeReference
+    let dayStart = dayEnd.addingTimeInterval(-24 * 3600)
+    let candidate = SleepSessionStore.shared.pastSessions
+      .filter { $0.startedAt >= dayStart && $0.startedAt < dayEnd }
+      .max(by: { $0.durationSeconds < $1.durationSeconds })
+    guard let session = candidate else {
+      lastNight = nil
+      return
+    }
+    let need: Double = 8 * 3600
+    let duration = session.durationSeconds
+    let performance = min(1.0, duration / need)
+    lastNight = SleepWindowDetector.DetectedWindow(
+      onset: session.startedAt,
+      wake: session.endedAt,
+      durationSeconds: duration,
+      restingHRBaseline: Double(UserProfile.restingHeartRate),
+      qualifiedWindowCount: 0,
+      performance: performance,
+      confidence: 1.0
+    )
     let samples = HeartRateSeriesStore.shared.samples(
       from: wakeReference.addingTimeInterval(-18 * 3600),
       to: wakeReference
     )
     let resting = HeartRateSeriesStore.shared.restingEstimate()
-    lastNight = SleepWindowDetector.detect(samples: samples, restingEstimate: resting, now: wakeReference)
     autoArmIfAsleep(samples: samples, resting: resting?.bpm ?? Double(UserProfile.restingHeartRate))
   }
 

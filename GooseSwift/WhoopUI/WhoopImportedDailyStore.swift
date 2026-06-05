@@ -181,14 +181,16 @@ final class WhoopImportedDailyStore: ObservableObject {
           byKey[parsed.dateKey] = parsed
         }
       }
-      // Overlay recovery_readings on top of imported_daily_summary. Any
-      // date_key where we have a local-computed recovery score (Goose-
-      // initiated sleep session) takes precedence — that's what surfaces
-      // recovery dots on the date strip for days WHOOP never imported
-      // (the local-only nights and "today" before WHOOP syncs).
+      // Overlay our four typed reading tables on top of
+      // imported_daily_summary via the unified daily_readings bridge.
+      // For any date_key where we have a locally-computed value
+      // (Goose-initiated session, finalized strain, etc.) that value
+      // takes precedence — that's what surfaces recovery dots, today's
+      // strain, and any local sleep numbers on past-day views without
+      // each UI surface needing per-table queries.
       do {
         let response = try await Task.detached(priority: .userInitiated) { [bridge] in
-          try bridge.request(method: "recovery.list_by_date_range", args: [
+          try bridge.request(method: "daily_readings.list_by_date_range", args: [
             "database_path": databasePath,
             "start_date_key": start,
             "end_date_key": end,
@@ -196,39 +198,13 @@ final class WhoopImportedDailyStore: ObservableObject {
         }.value
         let rows = response["rows"] as? [[String: Any]] ?? []
         for row in rows {
-          guard let dateKey = row["date_key"] as? String,
-                let score = (row["recovery_score"] as? Double)
-                  ?? (row["recovery_score"] as? NSNumber).map({ $0.doubleValue }) else {
-            continue
-          }
+          guard let dateKey = row["date_key"] as? String else { continue }
           let existing = byKey[dateKey]
-          byKey[dateKey] = DailySummary(
-            dateKey: dateKey,
-            recoveryScore: score,
-            hrvRmssdMs: existing?.hrvRmssdMs,
-            restingHrBpm: existing?.restingHrBpm,
-            spo2Pct: existing?.spo2Pct,
-            skinTempC: existing?.skinTempC,
-            sleepPerformancePct: existing?.sleepPerformancePct,
-            sleepEfficiencyPct: existing?.sleepEfficiencyPct,
-            sleepInBedMs: existing?.sleepInBedMs,
-            sleepAwakeMs: existing?.sleepAwakeMs,
-            sleepLightMs: existing?.sleepLightMs,
-            sleepDeepMs: existing?.sleepDeepMs,
-            sleepRemMs: existing?.sleepRemMs,
-            sleepCycleCount: existing?.sleepCycleCount,
-            sleepDisturbanceCount: existing?.sleepDisturbanceCount,
-            sleepNeedBaselineMs: existing?.sleepNeedBaselineMs,
-            sleepNeedFromDebtMs: existing?.sleepNeedFromDebtMs,
-            sleepNeedFromStrainMs: existing?.sleepNeedFromStrainMs,
-            sleepNeedFromNapMs: existing?.sleepNeedFromNapMs,
-            strainScore: existing?.strainScore,
-            strainKilojoules: existing?.strainKilojoules
-          )
+          byKey[dateKey] = Self.merge(existing: existing, dateKey: dateKey, typed: row)
         }
       } catch {
-        // Recovery overlay failure isn't fatal; the imported summaries
-        // are still valid.
+        // Daily-readings overlay failure isn't fatal; the imported
+        // summaries are still valid.
       }
       self.byDate = byKey
       self.importedCount = byKey.count
@@ -271,6 +247,66 @@ final class WhoopImportedDailyStore: ObservableObject {
     if let i64 = v as? Int64 { return Int(i64) }
     if let d = v as? Double { return Int(d) }
     return nil
+  }
+
+  private static func doubleValue(_ v: Any?) -> Double? {
+    if let d = v as? Double { return d }
+    if let n = v as? NSNumber { return n.doubleValue }
+    if let i = v as? Int { return Double(i) }
+    return nil
+  }
+
+  /// Build a DailySummary by overlaying our typed-table values on top of
+  /// the WHOOP-imported baseline. Field-by-field: prefer the typed-table
+  /// value when present (`source == "goose.local"` rows are recompute
+  /// outputs we trust), otherwise keep whatever WHOOP gave us.
+  private static func merge(
+    existing: DailySummary?,
+    dateKey: String,
+    typed: [String: Any]
+  ) -> DailySummary {
+    let sleepScore = doubleValue(typed["sleep_score"])
+    let tibMin = intValue(typed["time_in_bed_minutes"])
+    let asleepMin = intValue(typed["total_sleep_minutes"])
+    let deepMin = intValue(typed["deep_minutes"])
+    let lightMin = intValue(typed["light_minutes"])
+    let awakeMin = intValue(typed["awake_minutes"])
+    let remMin = intValue(typed["rem_minutes"])
+    let cycleCount = intValue(typed["cycle_count"])
+    let disturbanceCount = intValue(typed["disturbance_count"])
+    let sleepNeedMs = intValue(typed["sleep_need_ms"])
+    let efficiencyFraction = doubleValue(typed["efficiency"])
+    let recoveryScore = doubleValue(typed["recovery_score"])
+    let hrvMs = doubleValue(typed["hrv_rmssd_ms"])
+    let rhrBpm = doubleValue(typed["resting_hr_bpm"])
+    let strainScore = doubleValue(typed["strain_score"])
+    let strainKj = doubleValue(typed["strain_kilojoules"])
+    let spo2 = doubleValue(typed["spo2_pct"])
+    let skinTemp = doubleValue(typed["skin_temp_c"])
+
+    return DailySummary(
+      dateKey: dateKey,
+      recoveryScore: recoveryScore ?? existing?.recoveryScore,
+      hrvRmssdMs: hrvMs ?? existing?.hrvRmssdMs,
+      restingHrBpm: rhrBpm ?? existing?.restingHrBpm,
+      spo2Pct: spo2 ?? existing?.spo2Pct,
+      skinTempC: skinTemp ?? existing?.skinTempC,
+      sleepPerformancePct: sleepScore ?? existing?.sleepPerformancePct,
+      sleepEfficiencyPct: efficiencyFraction.map { $0 * 100 } ?? existing?.sleepEfficiencyPct,
+      sleepInBedMs: tibMin.map { $0 * 60_000 } ?? existing?.sleepInBedMs,
+      sleepAwakeMs: awakeMin.map { $0 * 60_000 } ?? existing?.sleepAwakeMs,
+      sleepLightMs: lightMin.map { $0 * 60_000 } ?? existing?.sleepLightMs,
+      sleepDeepMs: deepMin.map { $0 * 60_000 } ?? existing?.sleepDeepMs,
+      sleepRemMs: remMin.map { $0 * 60_000 } ?? existing?.sleepRemMs,
+      sleepCycleCount: cycleCount ?? existing?.sleepCycleCount,
+      sleepDisturbanceCount: disturbanceCount ?? existing?.sleepDisturbanceCount,
+      sleepNeedBaselineMs: sleepNeedMs ?? existing?.sleepNeedBaselineMs,
+      sleepNeedFromDebtMs: existing?.sleepNeedFromDebtMs,
+      sleepNeedFromStrainMs: existing?.sleepNeedFromStrainMs,
+      sleepNeedFromNapMs: existing?.sleepNeedFromNapMs,
+      strainScore: strainScore ?? existing?.strainScore,
+      strainKilojoules: strainKj ?? existing?.strainKilojoules
+    )
   }
 
 }

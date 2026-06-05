@@ -414,6 +414,38 @@ pub struct RecoveryDateRangeRow {
     pub source: String,
 }
 
+/// Unified per-day rollup across sleep_readings + recovery_readings +
+/// daily_strain_readings + daily_vitals_readings. Every field is
+/// Optional because a date_key may have rows in some tables but not
+/// others (e.g. WHOOP day with imported recovery + strain but local
+/// session with a Goose-computed sleep_reading on top).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyReadingsRow {
+    pub date_key: String,
+    pub sleep_score: Option<f64>,
+    pub time_in_bed_minutes: Option<i64>,
+    pub total_sleep_minutes: Option<i64>,
+    pub deep_minutes: Option<i64>,
+    pub light_minutes: Option<i64>,
+    pub awake_minutes: Option<i64>,
+    pub rem_minutes: Option<i64>,
+    pub cycle_count: Option<i64>,
+    pub disturbance_count: Option<i64>,
+    pub efficiency: Option<f64>,
+    pub sleep_need_ms: Option<i64>,
+    pub sleep_source: Option<String>,
+    pub recovery_score: Option<f64>,
+    pub hrv_rmssd_ms: Option<f64>,
+    pub resting_hr_bpm: Option<f64>,
+    pub recovery_source: Option<String>,
+    pub strain_score: Option<f64>,
+    pub strain_kilojoules: Option<f64>,
+    pub strain_source: Option<String>,
+    pub spo2_pct: Option<f64>,
+    pub skin_temp_c: Option<f64>,
+    pub vitals_source: Option<String>,
+}
+
 /// Per-table counts emitted by `whoop_migrate_to_typed_tables`. Sent
 /// back over the bridge to surface in the iOS migration UI / telemetry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1737,6 +1769,105 @@ impl GooseStore {
         )?;
         let rows = stmt.query_map(params![start_date, end_date], |row| {
             row.get::<_, String>(0)
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Unified per-day rollup across the four typed reading tables.
+    /// Returns one row per date_key in [start, end], with the freshest
+    /// values from each table (goose.local wins over whoop.cloud on
+    /// the same date_key). WhoopImportedDailyStore reads this to back
+    /// every `dailyStore.summary(for:).X` consumer without each UI
+    /// surface needing per-table queries.
+    pub fn daily_readings_by_date_range(
+        &self,
+        start_date_key: &str,
+        end_date_key: &str,
+    ) -> GooseResult<Vec<DailyReadingsRow>> {
+        // SLEEP / RECOVERY / STRAIN each have a date_key column; vitals
+        // table is keyed by date_key directly. Use ROW_NUMBER() to pick
+        // the goose.local row when both sources exist.
+        let mut stmt = self.conn.prepare(
+            "WITH \
+             sleep_pick AS ( \
+               SELECT date_key, sleep_score, time_in_bed_minutes, \
+                      total_sleep_minutes, deep_minutes, light_minutes, \
+                      awake_minutes, rem_minutes, cycle_count, \
+                      disturbance_count, efficiency, sleep_need_ms, source, \
+                      ROW_NUMBER() OVER ( \
+                        PARTITION BY date_key \
+                        ORDER BY CASE WHEN source = 'goose.local' THEN 0 ELSE 1 END \
+                      ) AS rk \
+               FROM sleep_readings WHERE date_key BETWEEN ?1 AND ?2 AND date_key <> '' \
+             ), \
+             recovery_pick AS ( \
+               SELECT date_key, recovery_score, hrv_rmssd_ms, resting_hr_bpm, source, \
+                      ROW_NUMBER() OVER ( \
+                        PARTITION BY date_key \
+                        ORDER BY CASE WHEN source = 'goose.local' THEN 0 ELSE 1 END \
+                      ) AS rk \
+               FROM recovery_readings WHERE date_key BETWEEN ?1 AND ?2 \
+             ), \
+             strain_pick AS ( \
+               SELECT date_key, strain_score, strain_kilojoules, source \
+               FROM daily_strain_readings WHERE date_key BETWEEN ?1 AND ?2 \
+             ), \
+             vitals_pick AS ( \
+               SELECT date_key, spo2_pct, skin_temp_c, source \
+               FROM daily_vitals_readings WHERE date_key BETWEEN ?1 AND ?2 \
+             ), \
+             all_keys AS ( \
+               SELECT date_key FROM sleep_pick WHERE rk = 1 \
+               UNION SELECT date_key FROM recovery_pick WHERE rk = 1 \
+               UNION SELECT date_key FROM strain_pick \
+               UNION SELECT date_key FROM vitals_pick \
+             ) \
+             SELECT \
+               k.date_key, \
+               s.sleep_score, s.time_in_bed_minutes, s.total_sleep_minutes, \
+               s.deep_minutes, s.light_minutes, s.awake_minutes, s.rem_minutes, \
+               s.cycle_count, s.disturbance_count, s.efficiency, s.sleep_need_ms, \
+               s.source AS sleep_source, \
+               r.recovery_score, r.hrv_rmssd_ms, r.resting_hr_bpm, r.source AS recovery_source, \
+               st.strain_score, st.strain_kilojoules, st.source AS strain_source, \
+               v.spo2_pct, v.skin_temp_c, v.source AS vitals_source \
+             FROM all_keys k \
+             LEFT JOIN (SELECT * FROM sleep_pick WHERE rk = 1) s USING (date_key) \
+             LEFT JOIN (SELECT * FROM recovery_pick WHERE rk = 1) r USING (date_key) \
+             LEFT JOIN strain_pick st USING (date_key) \
+             LEFT JOIN vitals_pick v USING (date_key) \
+             ORDER BY k.date_key ASC",
+        )?;
+        let rows = stmt.query_map(params![start_date_key, end_date_key], |row| {
+            Ok(DailyReadingsRow {
+                date_key: row.get(0)?,
+                sleep_score: row.get(1)?,
+                time_in_bed_minutes: row.get(2)?,
+                total_sleep_minutes: row.get(3)?,
+                deep_minutes: row.get(4)?,
+                light_minutes: row.get(5)?,
+                awake_minutes: row.get(6)?,
+                rem_minutes: row.get(7)?,
+                cycle_count: row.get(8)?,
+                disturbance_count: row.get(9)?,
+                efficiency: row.get(10)?,
+                sleep_need_ms: row.get(11)?,
+                sleep_source: row.get(12)?,
+                recovery_score: row.get(13)?,
+                hrv_rmssd_ms: row.get(14)?,
+                resting_hr_bpm: row.get(15)?,
+                recovery_source: row.get(16)?,
+                strain_score: row.get(17)?,
+                strain_kilojoules: row.get(18)?,
+                strain_source: row.get(19)?,
+                spo2_pct: row.get(20)?,
+                skin_temp_c: row.get(21)?,
+                vitals_source: row.get(22)?,
+            })
         })?;
         let mut out = Vec::new();
         for row in rows {

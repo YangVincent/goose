@@ -2502,6 +2502,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(strain_list_dates_present_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "daily_readings.list_by_date_range" => request_args::<DailyReadingsListArgs>(&request)
+            .and_then(daily_readings_list_by_date_range_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "whoop.migrate_to_typed_tables" => request_args::<WhoopMigrateArgs>(&request)
             .and_then(whoop_migrate_to_typed_tables_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -7977,6 +7981,13 @@ struct RecoveryListByDateRangeArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct DailyReadingsListArgs {
+    database_path: String,
+    start_date_key: String,
+    end_date_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct StrainUpsertReadingArgs {
     database_path: String,
     date_key: String,
@@ -8465,6 +8476,20 @@ fn recovery_list_by_date_range_bridge(
 ) -> GooseResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let rows = store.recovery_readings_by_date_range(&args.start_date_key, &args.end_date_key)?;
+    Ok(serde_json::json!({ "rows": rows }))
+}
+
+/// Unified per-day rollup across recovery_readings + sleep_readings +
+/// daily_strain_readings + daily_vitals_readings, one row per date_key.
+/// For each table we pick the goose.local row over the whoop.cloud row
+/// when both exist for the same date_key. Drives WhoopImportedDailyStore
+/// so every UI consumer that reads `dailyStore.summary(for:).X` gets
+/// the freshest typed-table value transparently.
+fn daily_readings_list_by_date_range_bridge(
+    args: DailyReadingsListArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.daily_readings_by_date_range(&args.start_date_key, &args.end_date_key)?;
     Ok(serde_json::json!({ "rows": rows }))
 }
 

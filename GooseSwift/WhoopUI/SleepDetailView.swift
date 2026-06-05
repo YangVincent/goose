@@ -109,11 +109,17 @@ struct SleepDetailView: View {
   }
 
   private var resolvedPerformance: (value: Int?, source: SleepDetailSource) {
+    // Source priority matches the SLEEP READING card so the hero score
+    // and the card never disagree:
+    //   1. WHOOP-imported daily summary (synced past days)
+    //   2. The SleepReading.sleep_score from the card's reading
+    // Auto-detected sleepStore window is intentionally not consulted
+    // — it surfaced fake 19% numbers from "1h30m / 8h need" math.
     if let server = dailyStore.summary(for: selectedDay.currentDate)?.sleepPerformancePct {
       return (Int(server.rounded()), .server)
     }
-    if let window = sleepStore.lastNight {
-      return (Int((window.performance * 100).rounded()), .local)
+    if let r = reading {
+      return (Int(r.sleepScore.rounded()), .local)
     }
     return (nil, .none)
   }
@@ -121,14 +127,17 @@ struct SleepDetailView: View {
   private enum SleepDetailSource { case server, local, none }
 
   private var totalSleepDurationText: String? {
+    // Source priority matches the SLEEP READING card so the hero and
+    // the card always agree on TIB:
+    //   1. WHOOP-imported daily summary (past days that synced)
+    //   2. The just-computed SleepReading (today / last night)
+    // Auto-detected sleepStore window is intentionally not consulted
+    // here — it produced inconsistent numbers against the card.
     if let inBed = dailyStore.summary(for: selectedDay.currentDate)?.sleepInBedMs {
       return Self.formatMillis(inBed)
     }
-    if let window = sleepStore.lastNight {
-      let total = Int(window.durationSeconds.rounded())
-      let h = total / 3600
-      let m = (total % 3600) / 60
-      return "\(h)h \(String(format: "%02d", m))m"
+    if let r = reading {
+      return Self.formatMinutes(r.timeInBedMinutes)
     }
     return nil
   }
@@ -916,7 +925,7 @@ struct SleepDetailView: View {
       Text(String(format: "%.0f", r.recoveryScore))
         .font(.system(size: 52, weight: .heavy, design: .rounded))
         .monospacedDigit()
-        .foregroundStyle(scoreColor(r.recoveryScore))
+        .foregroundStyle(recoveryZoneColor(r.recoveryScore))
       Text("/ 100")
         .font(.system(size: 16, weight: .heavy, design: .rounded))
         .foregroundStyle(.white.opacity(0.45))
@@ -924,7 +933,7 @@ struct SleepDetailView: View {
       Text(recoveryZoneLabel(r.recoveryScore))
         .font(.system(size: 10, weight: .heavy, design: .rounded))
         .tracking(1.5)
-        .foregroundStyle(scoreColor(r.recoveryScore))
+        .foregroundStyle(recoveryZoneColor(r.recoveryScore))
     }
     LazyVGrid(columns: [
       GridItem(.flexible(), alignment: .leading),
@@ -966,6 +975,15 @@ struct SleepDetailView: View {
     return "RED"
   }
 
+  /// Color the recovery score by WHOOP zone. Distinct from `scoreColor`,
+  /// which is calibrated for sleep sub-scores (different thresholds).
+  /// Recovery: 67+ green, 34-66 yellow, <34 red — matches the zone label.
+  private func recoveryZoneColor(_ v: Double) -> Color {
+    if v >= 67 { return Self.greenAccent }
+    if v >= 34 { return Self.yellowAccent }
+    return Self.redAccent
+  }
+
   private func scoreColor(_ v: Double) -> Color {
     if v >= 85 { return Self.greenAccent }
     if v >= 70 { return Self.yellowAccent }
@@ -980,14 +998,12 @@ struct SleepDetailView: View {
   }
 
   /// A "sleep day" runs from 22:00 the previous calendar day to 22:00
-  /// of the selected day. All explicit SleepSessionStore sessions whose
-  /// `startedAt` falls in that window count as last night's sleep. The
-  /// card computes one reading over `min(start) ... max(end)` — for a
-  /// single-sleep night that's just the session, for a night-plus-nap
-  /// case it stitches them into one contiguous window (gaps land in
-  /// "awake" because there are no HR samples there). When zero sessions
-  /// are in the window, the card shows the empty state — no guessing
-  /// from raw HR.
+  /// of the selected day. Pick the **longest** SleepSessionStore session
+  /// whose `startedAt` falls in that window — that's the night's main
+  /// sleep. Short test taps (Start Sleep → End Sleep within minutes) get
+  /// filtered out by the longest-wins selection. When zero sessions are
+  /// in the window the card shows the empty state — no guessing from
+  /// raw HR.
   private func refreshReading() {
     let cal = Calendar.current
     let dayEnd = cal.date(
@@ -998,17 +1014,14 @@ struct SleepDetailView: View {
     let inWindow = sleepSession.pastSessions.filter {
       $0.startedAt >= dayStart && $0.startedAt < dayEnd
     }
-    guard let earliest = inWindow.map(\.startedAt).min(),
-          let latest = inWindow.map(\.endedAt).max(),
-          let primary = inWindow.min(by: { $0.startedAt < $1.startedAt })
-    else {
+    guard let primary = inWindow.max(by: { $0.durationSeconds < $1.durationSeconds }) else {
       reading = nil
       return
     }
     loadReading(
       sessionID: primary.id.uuidString,
-      startMs: Int64((earliest.timeIntervalSince1970 * 1000).rounded()),
-      endMs: Int64((latest.timeIntervalSince1970 * 1000).rounded())
+      startMs: Int64((primary.startedAt.timeIntervalSince1970 * 1000).rounded()),
+      endMs: Int64((primary.endedAt.timeIntervalSince1970 * 1000).rounded())
     )
   }
 

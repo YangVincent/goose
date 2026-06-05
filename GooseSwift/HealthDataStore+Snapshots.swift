@@ -75,10 +75,8 @@ extension HealthDataStore {
     let inWindow = SleepSessionStore.shared.pastSessions.filter {
       $0.startedAt >= dayStart && $0.startedAt < dayEnd
     }
-    guard let earliest = inWindow.map(\.startedAt).min(),
-          let latest = inWindow.map(\.endedAt).max(),
-          let primary = inWindow.min(by: { $0.startedAt < $1.startedAt })
-    else {
+    // Longest session wins — see SleepDetailView.refreshReading.
+    guard let primary = inWindow.max(by: { $0.durationSeconds < $1.durationSeconds }) else {
       return
     }
     _ = try bridge.request(
@@ -86,8 +84,8 @@ extension HealthDataStore {
       args: [
         "database_path": databasePath,
         "session_id": primary.id.uuidString,
-        "start_time_unix_ms": Int64((earliest.timeIntervalSince1970 * 1000).rounded()),
-        "end_time_unix_ms": Int64((latest.timeIntervalSince1970 * 1000).rounded()),
+        "start_time_unix_ms": Int64((primary.startedAt.timeIntervalSince1970 * 1000).rounded()),
+        "end_time_unix_ms": Int64((primary.endedAt.timeIntervalSince1970 * 1000).rounded()),
       ]
     )
   }

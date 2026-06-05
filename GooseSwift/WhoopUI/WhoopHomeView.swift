@@ -136,9 +136,13 @@ struct WhoopHomeView: View {
   /// On every home appear: backfill last night's session (if missing),
   /// recompute today's live strain, finalize any unfinalized past days
   /// into SQLite, trigger a sleep+recovery compute for last night, then
-  /// load whatever the selected date strip is on. Idempotent — re-running
-  /// has no effect when nothing's missing.
+  /// load whatever the selected date strip is on. Caches are cleared
+  /// up front so a stale value from a previous (pre-compute) load can't
+  /// linger past a refresh.
   private func refreshHomeData() {
+    pastStrainByDate.removeAll()
+    recoveryByDate.removeAll()
+    sleepByDate.removeAll()
     SleepSessionStore.shared.backfillKnownNightIfMissing()
     DayStrainStore.shared.refresh()
     DayStrainStore.finalizePastDaysIfNeeded()
@@ -158,14 +162,13 @@ struct WhoopHomeView: View {
     let inWindow = SleepSessionStore.shared.pastSessions.filter {
       $0.startedAt >= dayStart && $0.startedAt < dayEnd
     }
-    guard let primary = inWindow.min(by: { $0.startedAt < $1.startedAt }),
-          let earliest = inWindow.map(\.startedAt).min(),
-          let latest = inWindow.map(\.endedAt).max()
+    // Longest session wins — short test taps don't count as "last night".
+    guard let primary = inWindow.max(by: { $0.durationSeconds < $1.durationSeconds })
     else { return }
     let dbPath = HealthDataStore.defaultDatabasePath()
     let sessionID = primary.id.uuidString
-    let startMs = Int64((earliest.timeIntervalSince1970 * 1000).rounded())
-    let endMs = Int64((latest.timeIntervalSince1970 * 1000).rounded())
+    let startMs = Int64((primary.startedAt.timeIntervalSince1970 * 1000).rounded())
+    let endMs = Int64((primary.endedAt.timeIntervalSince1970 * 1000).rounded())
     Task.detached(priority: .userInitiated) {
       let bridge = GooseRustBridge()
       // sleep.compute_reading chains recovery.compute_from_sleep_reading
@@ -198,7 +201,9 @@ struct WhoopHomeView: View {
     let dbPath = HealthDataStore.defaultDatabasePath()
 
     // Strain: today comes from live in-memory store; past days from sqlite.
-    if !Calendar.current.isDateInToday(date), pastStrainByDate[key] == nil {
+    // Always re-fetch (no cache short-circuit) — refreshHomeData clears
+    // the cache up-front; this fetch is what populates it.
+    if !Calendar.current.isDateInToday(date) {
       Task.detached(priority: .userInitiated) {
         let bridge = GooseRustBridge()
         let response = try? bridge.request(
@@ -218,7 +223,8 @@ struct WhoopHomeView: View {
     // last night's reading. For past dates we walk the daily history.
     // Also extract sleep_score from the components — surfaces on the
     // sleep ring when there's no WHOOP-imported sleepPerformancePct.
-    if recoveryByDate[key] == nil || sleepByDate[key] == nil {
+    // Always re-fetch — see strain comment above.
+    do {
       Task.detached(priority: .userInitiated) {
         let bridge = GooseRustBridge()
         let response = try? bridge.request(

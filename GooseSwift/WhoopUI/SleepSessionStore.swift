@@ -149,6 +149,28 @@ final class SleepSessionStore: ObservableObject {
   }
 
   /// User taps "Start Sleep" — record start time, arm the audio recorder,
+  /// Whether the "Start Sleep" button should be visible. Rules:
+  ///
+  /// - If a session is currently active, the caller renders "End Sleep"
+  ///   instead — this flag is moot, but we return true so the button
+  ///   shows up.
+  /// - If the most recent past session ended **today and before 21:00**,
+  ///   we hide the button until 21:00. The user already slept this
+  ///   night; another tap before evening would create a daytime "nap"
+  ///   session that fights the actual overnight reading.
+  /// - Otherwise (no past session, last session was a different day, or
+  ///   it's already past 21:00), show the button — the user might be
+  ///   going to bed.
+  var shouldShowStartSleep: Bool {
+    if active != nil { return true }
+    guard let lastSession = pastSessions.first else { return true }
+    let cal = Calendar.current
+    let now = Date()
+    guard cal.isDate(lastSession.endedAt, inSameDayAs: now) else { return true }
+    let nineteenHundred = cal.date(bySettingHour: 21, minute: 0, second: 0, of: now) ?? now
+    return now >= nineteenHundred
+  }
+
   /// and kick off the 1-min detection timer. Audio is on for the full
   /// session by design; the range between startedAt and endedAt is what
   /// downstream sleep analysis runs against.

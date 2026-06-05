@@ -72,29 +72,34 @@ struct WhoopTodayActivitiesCard: View {
           }
           .buttonStyle(.plain)
 
-          Button {
-            if sleepSession.active == nil {
-              sleepSession.startSleep()
-            } else {
-              sleepSession.endSleep()
+          // Start Sleep is hidden between End Sleep and 21:00 same day
+          // so a tap during the day doesn't create a daytime "nap"
+          // session that competes with last night's reading.
+          if sleepSession.shouldShowStartSleep {
+            Button {
+              if sleepSession.active == nil {
+                sleepSession.startSleep()
+              } else {
+                sleepSession.endSleep()
+              }
+            } label: {
+              HStack(spacing: 6) {
+                Image(systemName: sleepSession.active == nil ? "moon.fill" : "stop.fill")
+                  .font(.system(size: 11, weight: .heavy))
+                Text(sleepSession.active == nil ? "START SLEEP" : "END SLEEP")
+                  .font(.system(size: 10, weight: .heavy, design: .rounded))
+                  .tracking(1.5)
+              }
+              .foregroundStyle(sleepSession.active == nil ? Color(red: 0.55, green: 0.85, blue: 1.0) : .black)
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 10)
+              .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                  .fill(sleepSession.active == nil ? Color(red: 0.55, green: 0.85, blue: 1.0).opacity(0.18) : Color(red: 0.55, green: 0.85, blue: 1.0))
+              )
             }
-          } label: {
-            HStack(spacing: 6) {
-              Image(systemName: sleepSession.active == nil ? "moon.fill" : "stop.fill")
-                .font(.system(size: 11, weight: .heavy))
-              Text(sleepSession.active == nil ? "START SLEEP" : "END SLEEP")
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.5)
-            }
-            .foregroundStyle(sleepSession.active == nil ? Color(red: 0.55, green: 0.85, blue: 1.0) : .black)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-              RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(sleepSession.active == nil ? Color(red: 0.55, green: 0.85, blue: 1.0).opacity(0.18) : Color(red: 0.55, green: 0.85, blue: 1.0))
-            )
+            .buttonStyle(.plain)
           }
-          .buttonStyle(.plain)
         }
       }
     }

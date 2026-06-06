@@ -81,6 +81,7 @@
 			F100000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift */; };
 			F100000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift */; };
 			F100000000000000000000FE /* WhoopUI/StrainDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000FE /* WhoopUI/StrainDetailView.swift */; };
+			F100000000000000000000FD /* WhoopUI/StrainTrendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000FD /* WhoopUI/StrainTrendView.swift */; };
 			F100000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift */; };
 			F100000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift */; };
 			F100000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift */; };
@@ -288,6 +289,7 @@
 			F200000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepAudioRecorder.swift; sourceTree = "<group>"; };
 			F200000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/RecoveryFactorsDetailView.swift; sourceTree = "<group>"; };
 			F200000000000000000000FE /* WhoopUI/StrainDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StrainDetailView.swift; sourceTree = "<group>"; };
+			F200000000000000000000FD /* WhoopUI/StrainTrendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/StrainTrendView.swift; sourceTree = "<group>"; };
 			F200000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepCoachDetailView.swift; sourceTree = "<group>"; };
 			F200000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/WhoopImportedSleepStore.swift; sourceTree = "<group>"; };
 			F200000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopUI/SleepStageEstimator.swift; sourceTree = "<group>"; };
@@ -619,6 +621,7 @@
 				F200000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift */,
 				F200000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift */,
 				F200000000000000000000FE /* WhoopUI/StrainDetailView.swift */,
+				F200000000000000000000FD /* WhoopUI/StrainTrendView.swift */,
 				F200000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift */,
 				F200000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift */,
 				F200000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift */,
@@ -989,6 +992,7 @@
 				F100000000000000000000D9 /* WhoopUI/SleepAudioRecorder.swift in Sources */,
 				F100000000000000000000D8 /* WhoopUI/RecoveryFactorsDetailView.swift in Sources */,
 				F100000000000000000000FE /* WhoopUI/StrainDetailView.swift in Sources */,
+				F100000000000000000000FD /* WhoopUI/StrainTrendView.swift in Sources */,
 				F100000000000000000000D7 /* WhoopUI/SleepCoachDetailView.swift in Sources */,
 				F100000000000000000000D6 /* WhoopUI/WhoopImportedSleepStore.swift in Sources */,
 				F100000000000000000000D5 /* WhoopUI/SleepStageEstimator.swift in Sources */,

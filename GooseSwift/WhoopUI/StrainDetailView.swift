@@ -329,7 +329,7 @@ struct StrainDetailView: View {
       if key == todayKey, let live = liveStrain, live > 0 { return live }
       return dailyStore.byDate[key]?.strainScore
     }
-    trendCard(title: "STRAIN") {
+    trendCard(title: "STRAIN", destination: AnyView(StrainTrendView())) {
       Chart(points) { point in
         // Render every day's column, even at 0 — a tiny faint stub keeps
         // the day labels grounded to a visible mark instead of dangling
@@ -669,17 +669,40 @@ struct StrainDetailView: View {
     }
   }
 
-  private func trendCard<C: View>(title: String, @ViewBuilder _ content: () -> C) -> some View {
+  /// `destination` makes the header chevron a NavigationLink. Pass nil
+  /// for trends that don't have a drill-down view yet (the chevron then
+  /// renders as a non-tappable decoration).
+  private func trendCard<C: View>(
+    title: String,
+    destination: AnyView? = nil,
+    @ViewBuilder _ content: () -> C
+  ) -> some View {
     VStack(alignment: .leading, spacing: 10) {
-      HStack {
-        Text(title)
-          .font(.system(size: 11, weight: .heavy, design: .rounded))
-          .tracking(2)
-          .foregroundStyle(.white.opacity(0.7))
-        Spacer()
-        Image(systemName: "chevron.right")
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(.white.opacity(0.4))
+      if let destination {
+        NavigationLink { destination } label: {
+          HStack {
+            Text(title)
+              .font(.system(size: 11, weight: .heavy, design: .rounded))
+              .tracking(2)
+              .foregroundStyle(.white.opacity(0.7))
+            Spacer()
+            Image(systemName: "chevron.right")
+              .font(.system(size: 11, weight: .semibold))
+              .foregroundStyle(.white.opacity(0.55))
+          }
+        }
+        .buttonStyle(.plain)
+      } else {
+        HStack {
+          Text(title)
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .tracking(2)
+            .foregroundStyle(.white.opacity(0.7))
+          Spacer()
+          Image(systemName: "chevron.right")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.25))
+        }
       }
       content()
     }

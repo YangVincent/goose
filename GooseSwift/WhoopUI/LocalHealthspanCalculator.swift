@@ -30,8 +30,16 @@ enum LocalHealthspanCalculator {
     let value: Double
   }
 
-  /// Compute the local healthspan snapshot. Cheap — runs over the
-  /// already-loaded CompletedWorkoutStore in-memory list.
+  /// Compute the local healthspan snapshot.
+  ///
+  /// Sources every aggregate from the in-memory observable stores —
+  /// `WhoopImportedDailyStore.byDate` (which already overlays the four
+  /// typed reading tables, so it has per-day total_sleep_minutes,
+  /// resting_hr_bpm, hrv, etc.) plus `CompletedWorkoutStore` for
+  /// per-workout zone durations. Previously this scanned raw HR samples
+  /// per day for both the daily RHR series AND the nightly sleep
+  /// windows fallback — that was ~60 SQLite range queries on the main
+  /// thread and made the Age view take seconds to open.
   ///
   /// When `zoneMinutesByDay` is provided (keyed by `yyyy-MM-dd`, mapping
   /// zone ID → minutes), HR zone time uses those totals. Those values
@@ -80,7 +88,9 @@ enum LocalHealthspanCalculator {
       .filter { isStrength($0.activityRaw) }
       .reduce(0.0) { $0 + $1.elapsedSeconds } / 60.0
 
-    let rhr = HeartRateSeriesStore.shared.restingEstimate()?.bpm
+    // rhr override below; this var stays for legacy callers but the
+    // typed-table median (rhrFromDaily) is preferred when present.
+    let rhrFallback = HeartRateSeriesStore.shared.restingEstimate()?.bpm
 
     // Daily breakdowns for the trend charts (30 days).
     let dailyWindowStart = now.addingTimeInterval(-30 * 86_400)
@@ -118,26 +128,74 @@ enum LocalHealthspanCalculator {
       isStrength(w.activityRaw) ? w.elapsedSeconds / 60.0 : 0
     }
 
-    let dailyRHR = dailyRestingHRSeries(daysBack: 30, now: now)
-
-    // Sleep history derived per-night via SleepWindowDetector.
-    let nights = nightlySleepWindows(daysBack: 30, now: now)
-    let durationsHours = nights.map { $0.durationHours }
-    let avgHours: Double? = durationsHours.isEmpty
-      ? nil
-      : durationsHours.reduce(0, +) / Double(durationsHours.count)
-    let consistencyPct = sleepConsistencyPercent(nights: nights)
-
-    let dailySleepHours = nights.map { DailyPoint(date: $0.wake, value: $0.durationHours) }
-    let dailyConsistency: [DailyPoint] = nights.map {
-      DailyPoint(date: $0.wake, value: $0.consistencyApprox * 100)
+    // Pull daily RHR / sleep from the typed-table overlay (dailyStore).
+    // Both come from the rolled-up `daily_readings.list_by_date_range`
+    // query, which is one SQL call instead of 30 per-day HR scans.
+    let store = WhoopImportedDailyStore.shared
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    var dailyRHRPoints: [DailyPoint] = []
+    var dailySleepHourPoints: [DailyPoint] = []
+    var dailyConsistencyPoints: [DailyPoint] = []
+    var rhrValues: [Double] = []
+    var sleepHourValues: [Double] = []
+    for offset in 0..<30 {
+      guard let day = calendar.date(byAdding: .day, value: -offset, to: dayStartNow) else { continue }
+      let dayKey = f.string(from: day)
+      let summary = store.byDate[dayKey]
+      if let rhr = summary?.restingHrBpm, rhr > 0 {
+        dailyRHRPoints.append(DailyPoint(date: day, value: rhr))
+        rhrValues.append(rhr)
+      }
+      // Sleep duration: prefer total_sleep_minutes-derived hours via the
+      // in-bed - awake delta (matches WHOOP's "hours of sleep" semantics).
+      if let inBedMs = summary?.sleepInBedMs, inBedMs > 0 {
+        let awakeMs = summary?.sleepAwakeMs ?? 0
+        let asleepMs = max(0, inBedMs - awakeMs)
+        let hours = Double(asleepMs) / 3_600_000.0
+        if hours > 0 {
+          dailySleepHourPoints.append(DailyPoint(date: day, value: hours))
+          sleepHourValues.append(hours)
+        }
+      }
+      // Sleep "consistency" approx: use the sleep performance % as a
+      // light proxy (high perf usually correlates with on-schedule
+      // bedtime). Real bedtime-spread variance lands later.
+      if let perf = summary?.sleepPerformancePct, perf > 0 {
+        dailyConsistencyPoints.append(DailyPoint(date: day, value: perf))
+      }
     }
+    dailyRHRPoints.sort { $0.date < $1.date }
+    dailySleepHourPoints.sort { $0.date < $1.date }
+    dailyConsistencyPoints.sort { $0.date < $1.date }
+
+    // 30-day averages.
+    let avgHours: Double? = sleepHourValues.isEmpty
+      ? nil
+      : sleepHourValues.reduce(0, +) / Double(sleepHourValues.count)
+    let consistencyPct: Double? = {
+      let perf = dailyConsistencyPoints.map(\.value)
+      return perf.isEmpty ? nil : perf.reduce(0, +) / Double(perf.count)
+    }()
+    // RHR override (prefer rolling 30-day median from typed table over
+    // the HR-store's quick estimate, which only reflects the last few
+    // days of fresh samples).
+    let rhrFromDaily: Double? = {
+      guard !rhrValues.isEmpty else { return nil }
+      let sorted = rhrValues.sorted()
+      let n = sorted.count
+      return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+    }()
+    let dailyRHR = dailyRHRPoints
+    let dailySleepHours = dailySleepHourPoints
+    let dailyConsistency = dailyConsistencyPoints
 
     return Healthspan(
       hr_zones_1_3_weekly_hours: z13,
       hr_zones_4_5_weekly_hours: z45,
       strength_weekly_minutes: strengthMin,
-      rhr_30d: rhr,
+      rhr_30d: rhrFromDaily ?? rhrFallback,
       sleep_hours_30d: avgHours,
       sleep_consistency_pct_30d: consistencyPct,
       dailyHrZones13: dailyZ13,

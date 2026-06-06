@@ -1476,6 +1476,7 @@ struct SleepReadingSnapshot: Equatable {
   let deepMinutes: Int
   let lightMinutes: Int
   let awakeMinutes: Int
+  let noDataMinutes: Int
   let efficiency: Double
   let onsetLatencyMinutes: Int?
   let wakeAfterSleepOnsetMinutes: Int
@@ -1503,6 +1504,7 @@ struct SleepReadingSnapshot: Equatable {
       deepMinutes: Self.int(dict["deep_minutes"]) ?? 0,
       lightMinutes: Self.int(dict["light_minutes"]) ?? 0,
       awakeMinutes: Self.int(dict["awake_minutes"]) ?? 0,
+      noDataMinutes: Self.int(dict["no_data_minutes"]) ?? 0,
       efficiency: Self.double(dict["efficiency"]) ?? 0,
       onsetLatencyMinutes: Self.int(dict["onset_latency_minutes"]),
       wakeAfterSleepOnsetMinutes: Self.int(dict["wake_after_sleep_onset_minutes"]) ?? 0,

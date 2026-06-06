@@ -70,6 +70,14 @@ pub struct SleepReading {
     /// rows until the K18/RR-driven REM classifier lands (TODO).
     #[serde(default)]
     pub rem_minutes: i64,
+    /// Minutes during the window where no HR sample arrived. Could be
+    /// off-wrist OR strap-on-but-moving-with-bad-PPG-contact. Previously
+    /// lumped into awake_minutes which depressed efficiency unfairly when
+    /// the strap was struggling. Now reported separately and excluded
+    /// from the efficiency denominator so a sparse-capture night doesn't
+    /// score the same as a real high-WASO night.
+    #[serde(default)]
+    pub no_data_minutes: i64,
     pub efficiency: f64,
     pub deep_share_of_sleep: f64,
     pub awake_share_of_bed: f64,
@@ -477,18 +485,31 @@ pub fn compute_sleep_reading(
 
     let deep_epochs = rows.iter().filter(|r| r.stage == Stage::Deep).count() as i64;
     let light_epochs = rows.iter().filter(|r| r.stage == Stage::Light).count() as i64;
+    // Awake = epochs we positively classified as Awake (elevated HR or
+    // top-decile movement). Does NOT include NotApplicable (no HR
+    // sample) — that gets its own bucket so a sparse-capture stretch
+    // doesn't masquerade as a long wake.
     let awake_epochs = rows
         .iter()
-        .filter(|r| matches!(r.stage, Stage::Awake | Stage::NotApplicable))
+        .filter(|r| r.stage == Stage::Awake)
+        .count() as i64;
+    let no_data_epochs = rows
+        .iter()
+        .filter(|r| r.stage == Stage::NotApplicable)
         .count() as i64;
     let asleep_epochs = deep_epochs + light_epochs;
+    let recorded_epochs = asleep_epochs + awake_epochs;
     let deep_min = deep_epochs / EPOCHS_PER_MINUTE;
     let light_min = light_epochs / EPOCHS_PER_MINUTE;
     let awake_min = awake_epochs / EPOCHS_PER_MINUTE;
     let asleep_min = asleep_epochs / EPOCHS_PER_MINUTE;
+    let no_data_min = no_data_epochs / EPOCHS_PER_MINUTE;
 
-    let efficiency = if tib_epochs > 0 {
-        asleep_epochs as f64 / tib_epochs as f64
+    // Efficiency now uses RECORDED time (asleep + awake) as denominator,
+    // not raw time-in-bed. Excludes no-data so a strap dropout during
+    // bathroom breaks etc. doesn't depress your score.
+    let efficiency = if recorded_epochs > 0 {
+        asleep_epochs as f64 / recorded_epochs as f64
     } else {
         0.0
     };
@@ -497,8 +518,8 @@ pub fn compute_sleep_reading(
     } else {
         0.0
     };
-    let awake_share = if tib_epochs > 0 {
-        awake_epochs as f64 / tib_epochs as f64
+    let awake_share = if recorded_epochs > 0 {
+        awake_epochs as f64 / recorded_epochs as f64
     } else {
         0.0
     };
@@ -557,6 +578,7 @@ pub fn compute_sleep_reading(
         light_minutes: light_min,
         awake_minutes: awake_min,
         rem_minutes: 0,
+        no_data_minutes: no_data_min,
         efficiency: round3(efficiency),
         deep_share_of_sleep: round3(deep_share),
         awake_share_of_bed: round3(awake_share),

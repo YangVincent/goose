@@ -252,6 +252,7 @@ pub fn sleep_reading_from_whoop_import(
         light_minutes: light_min,
         awake_minutes: awake_min,
         rem_minutes: rem_min,
+        no_data_minutes: 0,
         efficiency: round3(efficiency),
         deep_share_of_sleep: round3(deep_share),
         awake_share_of_bed: round3(awake_share),

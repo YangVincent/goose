@@ -449,33 +449,13 @@ struct WhoopAgeView: View {
     }
   }
 
-  /// Bin Goose's locally-stored HR samples by HR zone, computing the
-  /// time attributable to each zone. For each sample we attribute the gap
-  /// to the next sample to its own zone (capped at 60 seconds so a long
-  /// disconnect doesn't blow up totals).
+  /// Today's per-zone minutes — read straight from the live
+  /// DayStrainStore which is now bucketing background HR into zones
+  /// (see DayStrainCalculator.compute zone bucketing). Previously this
+  /// re-scanned the day's full HR sample stream and re-bucketed inline,
+  /// duplicating work the strain calculator was already doing.
   private func strapZoneBucketsForToday() -> [Int: Double] {
-    let maxHR = Double(UserProfile.maxHeartRate)
-    let samples = HeartRateSeriesStore.shared.samples(forDayContaining: Date())
-    guard samples.count > 1 else { return [:] }
-    var buckets: [Int: Double] = [:]
-    for index in 0..<samples.count {
-      let sample = samples[index]
-      let nextTime = index + 1 < samples.count ? samples[index + 1].capturedAt : sample.capturedAt
-      let gapSec = min(60, nextTime.timeIntervalSince(sample.capturedAt))
-      guard gapSec > 0 else { continue }
-      let frac = Double(sample.bpm) / maxHR
-      let zone: Int
-      switch frac {
-      case 0.9...:     zone = 5
-      case 0.8..<0.9:  zone = 4
-      case 0.7..<0.8:  zone = 3
-      case 0.6..<0.7:  zone = 2
-      case 0.5..<0.6:  zone = 1
-      default:         continue
-      }
-      buckets[zone, default: 0] += gapSec / 60.0
-    }
-    return buckets
+    DayStrainStore.shared.today?.zoneMinutes ?? [:]
   }
 
   private static func zoneColor(_ zone: Int) -> Color {

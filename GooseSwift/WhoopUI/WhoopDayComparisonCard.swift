@@ -143,31 +143,25 @@ struct WhoopDayComparisonCard: View {
     return DayStrainStore.shared.today?.strain
   }
   private var yesterdayStrain: Double? {
+    // Persisted strain reading via dailyStore — was recomputing per-day
+    // from raw HR samples every appearance, ~100k samples scanned just
+    // for this single card.
     let date = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
-    let samples = HeartRateSeriesStore.shared.samples(forDayContaining: date)
-    guard samples.count >= 100 else { return nil }
-    let off = SensorSampleStore.shared.offWristWindows()
-    let day = DayStrainCalculator.computeDayStrain(
-      samples: samples,
-      offWristWindows: off,
-      for: date
-    )
-    return day.strain
+    return dailyStore.byDate[Self.isoDate(date)]?.strainScore
   }
   private var avg7dStrain: Double? {
     let strains = (1..<8).compactMap { offset -> Double? in
       let date = Calendar.current.date(byAdding: .day, value: -offset, to: Date()) ?? Date()
-      let samples = HeartRateSeriesStore.shared.samples(forDayContaining: date)
-      guard samples.count >= 100 else { return nil }
-      let off = SensorSampleStore.shared.offWristWindows()
-      let day = DayStrainCalculator.computeDayStrain(
-        samples: samples,
-        offWristWindows: off,
-        for: date
-      )
-      return day.strain
+      return dailyStore.byDate[Self.isoDate(date)]?.strainScore
     }
     return strains.isEmpty ? nil : strains.reduce(0, +) / Double(strains.count)
+  }
+
+  private static func isoDate(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    return f.string(from: date)
   }
 
   private var todayRHR: Double? {

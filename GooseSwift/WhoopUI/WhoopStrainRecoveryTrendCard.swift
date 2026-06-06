@@ -178,15 +178,21 @@ struct WhoopStrainRecoveryTrendCard: View {
   }
 
   private func computeLocalStrain(for date: Date) -> Double? {
-    let samples = HeartRateSeriesStore.shared.samples(forDayContaining: date)
-    guard samples.count >= 100 else { return nil }
-    let off = SensorSampleStore.shared.offWristWindows()
-    let day = DayStrainCalculator.computeDayStrain(
-      samples: samples,
-      offWristWindows: off,
-      for: date
-    )
-    return day.sampleCount >= 100 ? day.strain : nil
+    // Prefer the persisted daily strain reading (computed once and
+    // stored in daily_strain_readings via finalizePastDaysIfNeeded).
+    // For today, the live DayStrainStore has a fresher value than
+    // anything we'd compute here on the fly.
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) {
+      if let strain = DayStrainStore.shared.today?.strain, strain > 0 {
+        return strain
+      }
+    }
+    let key = Self.isoDate(date)
+    if let strain = dailyStore.byDate[key]?.strainScore, strain > 0 {
+      return strain
+    }
+    return nil
   }
 
   // MARK: - Helpers

@@ -2502,6 +2502,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(strain_list_dates_present_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "strain.list_readings_range" => request_args::<StrainListReadingsRangeArgs>(&request)
+            .and_then(strain_list_readings_range_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "daily_readings.list_by_date_range" => request_args::<DailyReadingsListArgs>(&request)
             .and_then(daily_readings_list_by_date_range_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -8026,6 +8030,13 @@ struct StrainListDatesPresentArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct StrainListReadingsRangeArgs {
+    database_path: String,
+    start_date: String,
+    end_date: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct WhoopMigrateArgs {
     database_path: String,
 }
@@ -8536,6 +8547,29 @@ fn strain_list_dates_present_bridge(
     let store = open_bridge_store(&args.database_path)?;
     let dates = store.daily_strain_dates_present(&args.start_date, &args.end_date)?;
     Ok(serde_json::json!({ "date_keys": dates }))
+}
+
+fn strain_list_readings_range_bridge(
+    args: StrainListReadingsRangeArgs,
+) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let rows = store.daily_strain_readings_range(&args.start_date, &args.end_date)?;
+    // Each reading_json is itself a serialized DayStrain; parse to a
+    // Value so Swift gets a nested object instead of a quoted string.
+    let readings: Vec<serde_json::Value> = rows
+        .into_iter()
+        .filter_map(|(date_key, json)| {
+            serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .map(|reading| {
+                    serde_json::json!({
+                        "date_key": date_key,
+                        "reading": reading,
+                    })
+                })
+        })
+        .collect();
+    Ok(serde_json::json!({ "readings": readings }))
 }
 
 /// **Offline-only bridge method.** Backfills `imported_daily_summary`

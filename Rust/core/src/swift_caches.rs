@@ -1952,6 +1952,30 @@ impl GooseStore {
         Ok(out)
     }
 
+    /// Pull every `daily_strain_readings.reading_json` in
+    /// [start_date, end_date]. Used by the strain detail view to render
+    /// per-day zone breakdowns + strain bars in a single bridge call
+    /// instead of N round-trips through `strain.get_for_date`.
+    pub fn daily_strain_readings_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> GooseResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT date_key, reading_json FROM daily_strain_readings \
+             WHERE date_key BETWEEN ?1 AND ?2 \
+             ORDER BY date_key",
+        )?;
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Unified per-day rollup across the four typed reading tables.
     /// Returns one row per date_key in [start, end], with the freshest
     /// values from each table (goose.local wins over whoop.cloud on

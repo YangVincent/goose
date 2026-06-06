@@ -31,13 +31,14 @@ struct WhoopMetricDetailView: View {
   @ObservedObject private var dailyStore = WhoopImportedDailyStore.shared
 
   var body: some View {
-    // Sleep + Recovery have their own richer drill-in views matching
-    // WHOOP's factor-breakdown layout. Strain still uses the legacy
-    // hero+chart+breakdown view.
+    // Sleep, Recovery, and Strain each have their own richer drill-in
+    // views matching WHOOP's per-metric layout.
     if metric == .sleep {
       SleepDetailView()
     } else if metric == .recovery {
       RecoveryFactorsDetailView()
+    } else if metric == .strain {
+      StrainDetailView()
     } else {
       legacyDetail
     }

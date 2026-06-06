@@ -89,7 +89,9 @@ extension GooseBLEClient {
     historicalCommandTimeoutWorkItem?.cancel()
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
-    // Schedule the absolute watchdog. Cancelled on completion / failure.
+    // Schedule the absolute watchdog. 45s is plenty when live stream is
+    // active (we've already gotten what we need); per-packet timeouts +
+    // idle workitem still fire at 7s/12s for the actual command flow.
     historicalSyncWatchdogWorkItem?.cancel()
     let watchdogRunID = historicalSyncRunID
     let watchdog = DispatchWorkItem { [weak self] in
@@ -99,12 +101,12 @@ extension GooseBLEClient {
       self.record(
         source: "ble.sync",
         title: "historical_sync.watchdog_timeout",
-        body: "no completion after 90s — completing with received=\(self.historicalPacketsReceivedThisSync)"
+        body: "no completion after 45s — completing with hist=\(self.historicalPacketsReceivedThisSync) live=\(self.livePacketCount)"
       )
       self.completeHistoricalSync(reason: "watchdog_timeout")
     }
     historicalSyncWatchdogWorkItem = watchdog
-    DispatchQueue.main.asyncAfter(deadline: .now() + 90, execute: watchdog)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: watchdog)
     let toastDetail = rangeOnly
       ? "Polling historical range"
       : (automatic ? "Requesting missed packets" : "Requesting historical packets")

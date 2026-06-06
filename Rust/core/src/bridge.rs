@@ -1728,6 +1728,14 @@ struct ImportedCommandValidationRecord {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct DebugRunSqlArgs {
+    database_path: String,
+    sql: String,
+    #[serde(default)]
+    row_limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct DebugStartSessionArgs {
     database_path: String,
     session_id: String,
@@ -2376,6 +2384,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
                 .map(|value| bridge_ok(&request.request_id, value))
                 .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
         }
+        "debug.run_sql" => request_args::<DebugRunSqlArgs>(&request)
+            .and_then(debug_run_sql_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "debug.start_session" => request_args::<DebugStartSessionArgs>(&request)
             .and_then(debug_start_session_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -7436,6 +7448,78 @@ fn command_risk_gate_name(risk_gate: &crate::commands::CommandRiskGate) -> &'sta
         crate::commands::CommandRiskGate::UserVisibleStateChange => "user_visible_state_change",
         crate::commands::CommandRiskGate::CriticalStateChange => "critical_state_change",
     }
+}
+
+/// Execute an arbitrary SELECT-only SQL query and return the rows as a
+/// JSON array of objects keyed by column name. Powers the on-device
+/// query bridge — drop a `.sql` file into the app's
+/// Documents/debug_queries/ directory, the Swift poller picks it up,
+/// calls this method, writes the result JSON to debug_results/, and the
+/// Mac pulls it via devicectl. Much faster than full DB pulls for
+/// targeted inspection during development.
+///
+/// Refuses any statement whose first uppercased word isn't SELECT or
+/// WITH. Caps results at row_limit (defaults to 5000, hard ceiling
+/// 100_000) so a runaway query can't return half the DB.
+fn debug_run_sql_bridge(args: DebugRunSqlArgs) -> GooseResult<serde_json::Value> {
+    let trimmed = args.sql.trim_start();
+    let head: String = trimmed
+        .chars()
+        .take_while(|c| c.is_alphabetic())
+        .collect::<String>()
+        .to_uppercase();
+    if !matches!(head.as_str(), "SELECT" | "WITH" | "PRAGMA" | "EXPLAIN") {
+        return Err(GooseError::message(format!(
+            "debug.run_sql only accepts SELECT/WITH/PRAGMA/EXPLAIN — got `{head}`"
+        )));
+    }
+    let row_limit = args.row_limit.unwrap_or(5_000).clamp(1, 100_000);
+    let store = open_bridge_store(&args.database_path)?;
+    let conn = &store.conn;
+    let mut stmt = conn
+        .prepare(&args.sql)
+        .map_err(|e| GooseError::message(format!("prepare failed: {e}")))?;
+    let column_names: Vec<String> = stmt
+        .column_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let column_count = column_names.len();
+    let mut rows = stmt
+        .query([])
+        .map_err(|e| GooseError::message(format!("query failed: {e}")))?;
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let mut truncated = false;
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| GooseError::message(format!("row fetch failed: {e}")))?
+    {
+        if out.len() as i64 >= row_limit {
+            truncated = true;
+            break;
+        }
+        let mut obj = serde_json::Map::with_capacity(column_count);
+        for (i, name) in column_names.iter().enumerate() {
+            let value: rusqlite::types::Value = row
+                .get(i)
+                .unwrap_or(rusqlite::types::Value::Null);
+            let json_value = match value {
+                rusqlite::types::Value::Null => serde_json::Value::Null,
+                rusqlite::types::Value::Integer(v) => serde_json::Value::from(v),
+                rusqlite::types::Value::Real(v) => serde_json::Value::from(v),
+                rusqlite::types::Value::Text(v) => serde_json::Value::from(v),
+                rusqlite::types::Value::Blob(v) => serde_json::Value::from(hex::encode(v)),
+            };
+            obj.insert(name.clone(), json_value);
+        }
+        out.push(serde_json::Value::Object(obj));
+    }
+    Ok(serde_json::json!({
+        "row_count": out.len(),
+        "truncated": truncated,
+        "columns": column_names,
+        "rows": out,
+    }))
 }
 
 fn debug_start_session_bridge(args: DebugStartSessionArgs) -> GooseResult<serde_json::Value> {

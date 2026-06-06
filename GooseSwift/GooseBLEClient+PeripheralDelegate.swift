@@ -16,6 +16,17 @@ extension GooseBLEClient: CBPeripheralDelegate {
       return
     }
     let services = peripheral.services ?? []
+    // Log the negotiated MTU on every connection so we can see whether
+    // iOS got the strap's max (147+ on modern hardware) or fell back to
+    // the conservative 20-byte default. Throughput scales linearly with
+    // this number — every doubling halves sync time.
+    let mtuWithResponse = peripheral.maximumWriteValueLength(for: .withResponse)
+    let mtuWithoutResponse = peripheral.maximumWriteValueLength(for: .withoutResponse)
+    record(
+      source: "ble",
+      title: "gatt.mtu",
+      body: "withResponse=\(mtuWithResponse) withoutResponse=\(mtuWithoutResponse)"
+    )
     record(source: "ble", title: "gatt.services", body: uuidList(services.map(\.uuid)))
     let hasWhoopService = services.contains(where: { isWhoopService($0.uuid) })
     if hasWhoopService {

@@ -27,6 +27,12 @@ struct AppShellView: View {
       // Idempotent on the server (upsert by date), runs only if last upload
       // is older than the uploader's minimum interval.
       await GooseUploader.shared.uploadNowIfStale()
+      // Debug-only: on-device SQL query poller. Drops .sql files in
+      // Documents/debug_queries/ get executed and their results land
+      // in Documents/debug_results/. Skipped entirely on release.
+      #if DEBUG
+      DebugSQLPoller.shared.start()
+      #endif
       // Refresh the workout cache from Rust SQLite on every foreground.
       await CompletedWorkoutStore.shared.refresh()
       // Recompute today's strain from local 1Hz HR samples so the strain

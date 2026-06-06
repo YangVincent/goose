@@ -22,6 +22,14 @@ struct WhoopAgeView: View {
     return Calendar.current.date(from: components) ?? Date()
   }()
 
+  /// Per-day zone_minutes pulled in one shot from
+  /// `daily_strain_readings.zone_minutes` via the new
+  /// `strain.list_readings_range` bridge. Keyed by `yyyy-MM-dd`.
+  /// Passed into LocalHealthspanCalculator so HR Zones 1-3 / 4-5
+  /// reflect the day's full HR (background + workouts), not just
+  /// time inside logged workout windows.
+  @State private var zoneMinutesByDay: [String: [Int: Double]] = [:]
+
   var body: some View {
     ZStack {
       Self.background.ignoresSafeArea()
@@ -44,8 +52,52 @@ struct WhoopAgeView: View {
         // pulls from CompletedWorkoutStore + HeartRateSeriesStore via
         // LocalHealthspanCalculator, both Rust-SQLite-backed.
         await CompletedWorkoutStore.shared.refresh()
+        await loadZoneMinutes()
       }
     }
+    .task { await loadZoneMinutes() }
+  }
+
+  /// One bridge call pulls 30 days of daily_strain_readings.zone_minutes.
+  /// Used by the HR zone factor cards.
+  private func loadZoneMinutes() async {
+    let cal = Calendar.current
+    let now = Date()
+    let end = cal.startOfDay(for: now)
+    guard let start = cal.date(byAdding: .day, value: -30, to: end) else { return }
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let bridge = GooseRustBridge()
+    let response: [String: Any]? = await Task.detached(priority: .userInitiated) {
+      try? bridge.request(
+        method: "strain.list_readings_range",
+        args: [
+          "database_path": dbPath,
+          "start_date": f.string(from: start),
+          "end_date": f.string(from: end),
+        ]
+      )
+    }.value
+    guard let response,
+          let rows = response["readings"] as? [[String: Any]] else { return }
+    var byKey: [String: [Int: Double]] = [:]
+    for row in rows {
+      guard let dateKey = row["date_key"] as? String,
+            let reading = row["reading"] as? [String: Any],
+            let zonesRaw = reading["zone_minutes"] as? [String: Any] else { continue }
+      var zoneMap: [Int: Double] = [:]
+      for (k, v) in zonesRaw {
+        guard let zoneID = Int(k) else { continue }
+        let minutes: Double = (v as? Double)
+          ?? (v as? NSNumber).map { $0.doubleValue }
+          ?? 0
+        if minutes > 0 { zoneMap[zoneID] = minutes }
+      }
+      if !zoneMap.isEmpty { byKey[dateKey] = zoneMap }
+    }
+    await MainActor.run { self.zoneMinutesByDay = byKey }
   }
 
   private var header: some View {
@@ -120,7 +172,7 @@ struct WhoopAgeView: View {
 
   @ViewBuilder
   private var factorBreakdown: some View {
-    let local = LocalHealthspanCalculator.compute()
+    let local = LocalHealthspanCalculator.compute(zoneMinutesByDay: zoneMinutesByDay)
     localComputedBanner
     sleepSection(local: local)
     strainSection(local: local)

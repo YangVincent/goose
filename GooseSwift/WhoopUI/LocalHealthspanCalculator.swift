@@ -32,27 +32,49 @@ enum LocalHealthspanCalculator {
 
   /// Compute the local healthspan snapshot. Cheap — runs over the
   /// already-loaded CompletedWorkoutStore in-memory list.
-  static func compute(now: Date = Date()) -> Healthspan {
+  ///
+  /// When `zoneMinutesByDay` is provided (keyed by `yyyy-MM-dd`, mapping
+  /// zone ID → minutes), HR zone time uses those totals. Those values
+  /// come from `daily_strain_readings.zone_minutes` and reflect ALL the
+  /// day's HR samples (background + workouts), not just the workout
+  /// windows. Days not present in the dict fall back to the workout-only
+  /// sum so older days without persisted strain readings still render.
+  static func compute(
+    now: Date = Date(),
+    zoneMinutesByDay: [String: [Int: Double]] = [:]
+  ) -> Healthspan {
     let calendar = Calendar.current
     let workouts = CompletedWorkoutStore.shared.workouts
+    let isoFmt = DateFormatter()
+    isoFmt.dateFormat = "yyyy-MM-dd"
+    isoFmt.timeZone = TimeZone.current
 
     // Weekly windows.
     let weekStart = now.addingTimeInterval(-7 * 86_400)
     let last7d = workouts.filter { $0.startedAt >= weekStart && $0.startedAt <= now }
 
-    var z13Seconds: Double = 0
-    var z45Seconds: Double = 0
-    for w in last7d {
-      let z1 = w.zoneSeconds(1)
-      let z2 = w.zoneSeconds(2)
-      let z3 = w.zoneSeconds(3)
-      let z4 = w.zoneSeconds(4)
-      let z5 = w.zoneSeconds(5)
-      z13Seconds += z1 + z2 + z3
-      z45Seconds += z4 + z5
+    // HR zone totals over the last 7 days. Prefer per-day strain
+    // overrides; fall back to workout-only zone seconds for days without
+    // a stored strain reading.
+    var z13Minutes: Double = 0
+    var z45Minutes: Double = 0
+    let dayStartNow = calendar.startOfDay(for: now)
+    for offset in 0..<7 {
+      guard let day = calendar.date(byAdding: .day, value: -offset, to: dayStartNow) else { continue }
+      let dayKey = isoFmt.string(from: day)
+      if let zones = zoneMinutesByDay[dayKey] {
+        z13Minutes += (zones[1] ?? 0) + (zones[2] ?? 0) + (zones[3] ?? 0)
+        z45Minutes += (zones[4] ?? 0) + (zones[5] ?? 0)
+      } else {
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: day) else { continue }
+        for w in workouts where w.startedAt >= day && w.startedAt < dayEnd {
+          z13Minutes += (w.zoneSeconds(1) + w.zoneSeconds(2) + w.zoneSeconds(3)) / 60.0
+          z45Minutes += (w.zoneSeconds(4) + w.zoneSeconds(5)) / 60.0
+        }
+      }
     }
-    let z13 = z13Seconds / 3600.0
-    let z45 = z45Seconds / 3600.0
+    let z13 = z13Minutes / 60.0
+    let z45 = z45Minutes / 60.0
 
     let strengthMin = last7d
       .filter { isStrength($0.activityRaw) }
@@ -64,12 +86,34 @@ enum LocalHealthspanCalculator {
     let dailyWindowStart = now.addingTimeInterval(-30 * 86_400)
     let last30d = workouts.filter { $0.startedAt >= dailyWindowStart && $0.startedAt <= now }
 
-    let dailyZ13 = bucketByDay(last30d, calendar: calendar) { w in
-      (w.zoneSeconds(1) + w.zoneSeconds(2) + w.zoneSeconds(3)) / 3600.0
+    // Per-day HR zone series — same override / fallback rule.
+    var dailyZ13: [DailyPoint] = []
+    var dailyZ45: [DailyPoint] = []
+    for offset in 0..<30 {
+      guard let day = calendar.date(byAdding: .day, value: -offset, to: dayStartNow) else { continue }
+      let dayKey = isoFmt.string(from: day)
+      let z13Min: Double
+      let z45Min: Double
+      if let zones = zoneMinutesByDay[dayKey] {
+        z13Min = (zones[1] ?? 0) + (zones[2] ?? 0) + (zones[3] ?? 0)
+        z45Min = (zones[4] ?? 0) + (zones[5] ?? 0)
+      } else {
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: day) else { continue }
+        var z13Sec: Double = 0
+        var z45Sec: Double = 0
+        for w in workouts where w.startedAt >= day && w.startedAt < dayEnd {
+          z13Sec += w.zoneSeconds(1) + w.zoneSeconds(2) + w.zoneSeconds(3)
+          z45Sec += w.zoneSeconds(4) + w.zoneSeconds(5)
+        }
+        z13Min = z13Sec / 60.0
+        z45Min = z45Sec / 60.0
+      }
+      if z13Min > 0 { dailyZ13.append(DailyPoint(date: day, value: z13Min / 60.0)) }
+      if z45Min > 0 { dailyZ45.append(DailyPoint(date: day, value: z45Min / 60.0)) }
     }
-    let dailyZ45 = bucketByDay(last30d, calendar: calendar) { w in
-      (w.zoneSeconds(4) + w.zoneSeconds(5)) / 3600.0
-    }
+    dailyZ13.sort { $0.date < $1.date }
+    dailyZ45.sort { $0.date < $1.date }
+
     let dailyStrength = bucketByDay(last30d, calendar: calendar) { w in
       isStrength(w.activityRaw) ? w.elapsedSeconds / 60.0 : 0
     }

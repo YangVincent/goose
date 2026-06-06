@@ -98,126 +98,134 @@ struct WhoopAgeFactorCard: View {
   }
 
   // MARK: - Bar
+  //
+  // Single shared GeometryReader so the label text, the triangle markers,
+  // and the bar itself all use one width. Previously the labels used a
+  // hardcoded 280pt assumption while the markers used the bar's actual
+  // pixel width — so on devices where the bar resolved to ~330pt the
+  // labels drifted off the markers by ~15-25pt.
 
   private var bar: some View {
     HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        sixMonthLabel
-        gradientBar
-        thirtyDayLabel
+      GeometryReader { geo in
+        VStack(spacing: 4) {
+          labelOverlay(
+            value: sixMonthValue,
+            captionAbove: "6 Month avg.",
+            captionBelow: nil,
+            valueColor: .white,
+            valueSize: 14,
+            captionColor: .white.opacity(0.55),
+            barWidth: geo.size.width
+          )
+          .frame(height: 26)
+          gradientBar(width: geo.size.width)
+          labelOverlay(
+            value: thirtyDayValue,
+            captionAbove: nil,
+            captionBelow: "30 Day avg.",
+            valueColor: .white.opacity(0.85),
+            valueSize: 13,
+            captionColor: .white.opacity(0.4),
+            barWidth: geo.size.width
+          )
+          .frame(height: 26)
+        }
       }
+      .frame(height: 86)
       yearsBadge
     }
   }
 
-  private var sixMonthLabel: some View {
-    HStack {
-      if let v = sixMonthValue {
-        VStack(alignment: .center, spacing: 0) {
-          Text("6 Month avg.")
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
-            .foregroundStyle(.white.opacity(0.55))
+  /// Label centered on the marker's x position. We size the label to its
+  /// natural width and clamp the center so the label can't overflow off
+  /// either edge of the bar.
+  private func labelOverlay(
+    value: Double?,
+    captionAbove: String?,
+    captionBelow: String?,
+    valueColor: Color,
+    valueSize: CGFloat,
+    captionColor: Color,
+    barWidth: CGFloat
+  ) -> some View {
+    ZStack(alignment: .leading) {
+      Color.clear
+      if let v = value {
+        let target = barWidth * CGFloat(normalised(v))
+        // Approximate half-width of the label so we can keep it onscreen.
+        let approxHalfWidth: CGFloat = 36
+        let cx = min(max(target, approxHalfWidth), barWidth - approxHalfWidth)
+        VStack(spacing: 0) {
+          if let captionAbove {
+            Text(captionAbove)
+              .font(.system(size: 9, weight: .heavy, design: .rounded))
+              .foregroundStyle(captionColor)
+          }
           Text("\(format(v)) \(unit)")
-            .font(.system(size: 14, weight: .heavy, design: .rounded))
+            .font(.system(size: valueSize, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundStyle(.white)
+            .foregroundStyle(valueColor)
+          if let captionBelow {
+            Text(captionBelow)
+              .font(.system(size: 9, weight: .heavy, design: .rounded))
+              .foregroundStyle(captionColor)
+          }
         }
-        .frame(maxWidth: .infinity)
-        .alignmentGuide(.leading) { d in d[HorizontalAlignment.center] }
-        .padding(.leading, max(0, markerInsetSixMonth - 26))
-      } else {
-        Color.clear.frame(height: 24)
+        .fixedSize()
+        .position(x: cx, y: 13)
       }
-      Spacer(minLength: 0)
     }
   }
 
-  private var thirtyDayLabel: some View {
-    HStack {
-      if let v = thirtyDayValue {
-        VStack(alignment: .center, spacing: 0) {
-          Text("\(format(v)) \(unit)")
-            .font(.system(size: 13, weight: .heavy, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(.white.opacity(0.85))
-          Text("30 Day avg.")
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
-            .foregroundStyle(.white.opacity(0.4))
-        }
-        .padding(.leading, max(0, markerInsetThirtyDay - 26))
-      } else {
-        Color.clear.frame(height: 24)
-      }
-      Spacer(minLength: 0)
-    }
-  }
-
-  /// Estimated horizontal inset (in pixels) of the 6-month marker from
-  /// the bar's leading edge. Used to vertically align the label text
-  /// above the marker. Calling code passes us logical positions; we
-  /// translate using an assumed 320pt bar width to keep this view free
-  /// of a GeometryReader for now.
-  private var markerInsetSixMonth: CGFloat {
-    guard let v = sixMonthValue else { return 0 }
-    return CGFloat(normalised(v) * 280)
-  }
-
-  private var markerInsetThirtyDay: CGFloat {
-    guard let v = thirtyDayValue else { return 0 }
-    return CGFloat(normalised(v) * 280)
-  }
-
-  private var gradientBar: some View {
-    GeometryReader { geo in
-      ZStack(alignment: .leading) {
-        // Gradient bar
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
-          .fill(gradient)
-          .frame(height: 18)
-
-        // Subtle dividers across 10 segments
-        ForEach(1..<10, id: \.self) { i in
-          let x = geo.size.width * CGFloat(i) / 10.0
-          Rectangle()
-            .fill(Color.black.opacity(0.35))
-            .frame(width: 1, height: 18)
-            .offset(x: x)
-        }
-
-        // 30-day marker (gray triangle pointing up, sitting just below bar)
-        if let v = thirtyDayValue {
-          let raw = geo.size.width * CGFloat(normalised(v))
-          let cx = max(4.5, min(geo.size.width - 4.5, raw))
-          Triangle()
-            .fill(Color.white.opacity(0.55))
-            .frame(width: 9, height: 7)
-            .offset(x: cx - 4.5, y: 20)
-        }
-        // 6-month marker (white triangle pointing down, sitting above bar)
-        if let v = sixMonthValue {
-          let raw = geo.size.width * CGFloat(normalised(v))
-          let cx = max(4.5, min(geo.size.width - 4.5, raw))
-          Triangle()
-            .fill(Color.white)
-            .rotationEffect(.degrees(180))
-            .frame(width: 9, height: 7)
-            .offset(x: cx - 4.5, y: -10)
-        }
-
-        // Range labels at the ends, overlaid on the bar
-        HStack {
-          Text(rangeStartLabel)
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
-            .foregroundStyle(.black.opacity(0.7))
-            .padding(.leading, 6)
-          Spacer()
-          Text(rangeEndLabel)
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
-            .foregroundStyle(.black.opacity(0.7))
-            .padding(.trailing, 6)
-        }
+  private func gradientBar(width: CGFloat) -> some View {
+    ZStack(alignment: .leading) {
+      RoundedRectangle(cornerRadius: 4, style: .continuous)
+        .fill(gradient)
         .frame(height: 18)
+
+      // Subtle dividers across 10 segments
+      ForEach(1..<10, id: \.self) { i in
+        let x = width * CGFloat(i) / 10.0
+        Rectangle()
+          .fill(Color.black.opacity(0.35))
+          .frame(width: 1, height: 18)
+          .offset(x: x)
       }
+
+      // 30-day marker (gray triangle pointing up, sitting just below bar)
+      if let v = thirtyDayValue {
+        let raw = width * CGFloat(normalised(v))
+        let cx = max(4.5, min(width - 4.5, raw))
+        Triangle()
+          .fill(Color.white.opacity(0.55))
+          .frame(width: 9, height: 7)
+          .offset(x: cx - 4.5, y: 20)
+      }
+      // 6-month marker (white triangle pointing down, sitting above bar)
+      if let v = sixMonthValue {
+        let raw = width * CGFloat(normalised(v))
+        let cx = max(4.5, min(width - 4.5, raw))
+        Triangle()
+          .fill(Color.white)
+          .rotationEffect(.degrees(180))
+          .frame(width: 9, height: 7)
+          .offset(x: cx - 4.5, y: -10)
+      }
+
+      // Range labels at the ends, overlaid on the bar
+      HStack {
+        Text(rangeStartLabel)
+          .font(.system(size: 9, weight: .heavy, design: .rounded))
+          .foregroundStyle(.black.opacity(0.7))
+          .padding(.leading, 6)
+        Spacer()
+        Text(rangeEndLabel)
+          .font(.system(size: 9, weight: .heavy, design: .rounded))
+          .foregroundStyle(.black.opacity(0.7))
+          .padding(.trailing, 6)
+      }
+      .frame(width: width, height: 18, alignment: .leading)
     }
     .frame(height: 28)
   }

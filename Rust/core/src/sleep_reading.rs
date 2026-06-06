@@ -20,7 +20,7 @@
 //!   - hrv         15%  (RMSSD vs personal baseline, 0.5x -> 0, 1.5x -> 100)
 //!   - restfulness 15%  (1 - awake share of bed, mapped to 0-100)
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::{GooseError, GooseResult};
@@ -123,7 +123,6 @@ enum Stage {
 
 #[derive(Debug, Clone)]
 struct MinuteRow {
-    #[allow(dead_code)]
     bucket_ms: i64,
     hr_mean: Option<f64>,
     hr_min: Option<i64>,
@@ -363,6 +362,48 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> Classi
     ClassifyOutputs { observed_resting }
 }
 
+fn persist_epochs(conn: &Connection, session_id: &str, rows: &[MinuteRow]) -> GooseResult<()> {
+    let stage_label = |stage: &Stage| -> &'static str {
+        match stage {
+            Stage::Awake => "wake",
+            Stage::Light => "light",
+            Stage::Deep => "deep",
+            Stage::NotApplicable => "n/a",
+        }
+    };
+    conn.execute(
+        "DELETE FROM sleep_epochs WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    let mut stmt = conn.prepare(
+        "INSERT INTO sleep_epochs ( \
+             session_id, epoch_index, epoch_start_unix_ms, epoch_end_unix_ms, \
+             stage, hr_mean_bpm, hr_std_bpm, rmssd_ms, movement_intensity \
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?;
+    for (i, row) in rows.iter().enumerate() {
+        let start = row.bucket_ms;
+        let end = row.bucket_ms + 60_000;
+        let label = stage_label(&row.stage);
+        // hr_std isn't computed yet at the minute-row level — we don't
+        // currently track per-minute std. Pass NULL; the consumer can
+        // synthesize 0 if needed.
+        let hr_std: Option<f64> = None;
+        stmt.execute(params![
+            session_id,
+            i as i64,
+            start,
+            end,
+            label,
+            row.hr_mean,
+            hr_std,
+            row.rmssd,
+            row.movement,
+        ])?;
+    }
+    Ok(())
+}
+
 fn first_sleep_onset_minutes(rows: &[MinuteRow]) -> Option<i64> {
     let mut run = 0i64;
     for (i, r) in rows.iter().enumerate() {
@@ -409,6 +450,15 @@ pub fn compute_sleep_reading(
         return Err(GooseError::message(
             "sleep reading window has zero minutes of data",
         ));
+    }
+
+    // Persist per-minute epochs so the iOS SleepHypnogramStore can read
+    // them directly on next open instead of re-scanning HR samples and
+    // re-bucketing in Swift. Only writes when a session_id is provided
+    // (callers that don't have one — e.g. ad-hoc range computes — get
+    // no persistence and the in-memory reading only).
+    if let Some(session_id) = session_id {
+        let _ = persist_epochs(conn, session_id, &rows);
     }
 
     let deep_min = rows.iter().filter(|r| r.stage == Stage::Deep).count() as i64;

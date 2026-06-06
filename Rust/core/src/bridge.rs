@@ -2518,6 +2518,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(sleep_compute_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "sleep.get_epochs" => request_args::<SleepGetEpochsArgs>(&request)
+            .and_then(sleep_get_epochs_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.get_reading" => request_args::<SleepGetReadingArgs>(&request)
             .and_then(sleep_get_reading_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -7949,6 +7953,12 @@ struct SleepGetReadingArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct SleepGetEpochsArgs {
+    database_path: String,
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct RecoveryComputeFromSleepReadingArgs {
     database_path: String,
     session_id: String,
@@ -8427,6 +8437,12 @@ fn sleep_compute_reading_bridge(args: SleepComputeReadingArgs) -> GooseResult<se
         map.insert("recovery_reading".to_string(), recovery_value);
     }
     Ok(value)
+}
+
+fn sleep_get_epochs_bridge(args: SleepGetEpochsArgs) -> GooseResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let epochs = store.sleep_epochs_for_session(&args.session_id)?;
+    Ok(serde_json::json!({ "epochs": epochs }))
 }
 
 fn sleep_get_reading_bridge(args: SleepGetReadingArgs) -> GooseResult<serde_json::Value> {

@@ -1456,6 +1456,46 @@ impl GooseStore {
         }
     }
 
+    /// All sleep_epochs rows for the given session, ordered by epoch_index.
+    /// Returns serialized JSON-ready dicts so the bridge layer can pass
+    /// them straight through without a row-mapping ceremony.
+    pub fn sleep_epochs_for_session(
+        &self,
+        session_id: &str,
+    ) -> GooseResult<Vec<serde_json::Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT epoch_index, epoch_start_unix_ms, epoch_end_unix_ms, \
+                    stage, hr_mean_bpm, hr_std_bpm, rmssd_ms, movement_intensity \
+             FROM sleep_epochs WHERE session_id = ?1 \
+             ORDER BY epoch_index ASC",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            let index: i64 = row.get(0)?;
+            let start_ms: i64 = row.get(1)?;
+            let end_ms: i64 = row.get(2)?;
+            let stage: String = row.get(3)?;
+            let hr_mean: Option<f64> = row.get(4)?;
+            let hr_std: Option<f64> = row.get(5)?;
+            let rmssd: Option<f64> = row.get(6)?;
+            let movement: Option<f64> = row.get(7)?;
+            Ok(serde_json::json!({
+                "epoch_index": index,
+                "epoch_start_unix_ms": start_ms,
+                "epoch_end_unix_ms": end_ms,
+                "stage": stage,
+                "hr_mean_bpm": hr_mean,
+                "hr_std_bpm": hr_std,
+                "rmssd_ms": rmssd,
+                "movement_intensity": movement,
+            }))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     pub fn upsert_recovery_reading(
         &self,
         reading: &crate::recovery_reading::RecoveryReading,

@@ -307,11 +307,20 @@ final class SleepHypnogramStore: ObservableObject {
 
   @Published private(set) var lastNight: SleepStageEstimator.Hypnogram?
 
-  /// Refresh from the current SleepWindowStore window. If the window store
-  /// has a historical reference date, this picks up that night.
+  /// Refresh from the current SleepWindowStore window. If the window has
+  /// a sessionID and sleep_epochs has rows for it, build the hypnogram
+  /// straight from the persisted minute-level stages — zero HR-sample
+  /// scanning, zero classification work, just a dict-style read. Falls
+  /// back to live SleepStageEstimator.hypnogram for sessions that
+  /// haven't been computed yet.
   func refresh() {
     guard let window = SleepWindowStore.shared.lastNight else {
       lastNight = nil
+      return
+    }
+    if let sessionID = window.sessionID,
+       let cached = Self.loadPersisted(sessionID: sessionID, window: window) {
+      lastNight = cached
       return
     }
     let hrSamples = HeartRateSeriesStore.shared.samples(from: window.onset, to: window.wake)
@@ -325,5 +334,77 @@ final class SleepHypnogramStore: ObservableObject {
       restingBPM: resting
     )
     lastNight = hypno
+  }
+
+  /// Read minute-level epochs from `sleep_epochs` (populated server-side
+  /// by `sleep.compute_reading` whenever a session_id is passed). Returns
+  /// nil if the table has no rows for this session, so the caller can
+  /// fall back to live compute.
+  private static func loadPersisted(
+    sessionID: String,
+    window: SleepWindowDetector.DetectedWindow
+  ) -> SleepStageEstimator.Hypnogram? {
+    let bridge = GooseRustBridge()
+    let dbPath = HealthDataStore.defaultDatabasePath()
+    let response: [String: Any]?
+    do {
+      response = try bridge.request(
+        method: "sleep.get_epochs",
+        args: ["database_path": dbPath, "session_id": sessionID]
+      )
+    } catch {
+      return nil
+    }
+    guard let response,
+          let rows = response["epochs"] as? [[String: Any]],
+          !rows.isEmpty else {
+      return nil
+    }
+    var epochs: [SleepStageEstimator.Epoch] = []
+    var stageMinutes: [SleepStageEstimator.Stage: Double] = [:]
+    for row in rows {
+      guard let startMs = (row["epoch_start_unix_ms"] as? Int64)
+              ?? (row["epoch_start_unix_ms"] as? Int).map(Int64.init),
+            let endMs = (row["epoch_end_unix_ms"] as? Int64)
+              ?? (row["epoch_end_unix_ms"] as? Int).map(Int64.init),
+            let stageStr = row["stage"] as? String else { continue }
+      let stage: SleepStageEstimator.Stage = {
+        switch stageStr {
+        case "deep": .deep
+        case "light": .light
+        case "rem": .rem
+        case "wake", "n/a": .wake
+        default: .wake
+        }
+      }()
+      let start = Date(timeIntervalSince1970: TimeInterval(startMs) / 1000.0)
+      let end = Date(timeIntervalSince1970: TimeInterval(endMs) / 1000.0)
+      let meanHR = (row["hr_mean_bpm"] as? Double)
+        ?? (row["hr_mean_bpm"] as? NSNumber).map { $0.doubleValue }
+        ?? 0
+      let hrStd = (row["hr_std_bpm"] as? Double)
+        ?? (row["hr_std_bpm"] as? NSNumber).map { $0.doubleValue }
+        ?? 0
+      let rmssd = (row["rmssd_ms"] as? Double)
+        ?? (row["rmssd_ms"] as? NSNumber).map { $0.doubleValue }
+      epochs.append(SleepStageEstimator.Epoch(
+        id: UUID(),
+        start: start,
+        end: end,
+        stage: stage,
+        meanHR: meanHR,
+        hrStd: hrStd,
+        rmssdMS: rmssd,
+        skinTempRaw: nil
+      ))
+      // Rust epochs are 60s buckets — 1 minute per row.
+      stageMinutes[stage, default: 0] += 1.0
+    }
+    return SleepStageEstimator.Hypnogram(
+      windowStart: window.onset,
+      windowEnd: window.wake,
+      epochs: epochs,
+      stageMinutes: stageMinutes
+    )
   }
 }

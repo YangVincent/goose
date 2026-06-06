@@ -29,6 +29,10 @@ enum SleepWindowDetector {
     let performance: Double
     /// Confidence based on baseline stability + sample density.
     let confidence: Double
+    /// PastSession id when this window was derived from a user-logged
+    /// Start/End Sleep. Carries through so SleepHypnogramStore can use
+    /// it as the cache key for sleep_epochs lookups.
+    var sessionID: String? = nil
   }
 
   /// Detect a sleep window for the night ending at `wakeReference` (defaults
@@ -170,7 +174,8 @@ final class SleepWindowStore: ObservableObject {
       restingHRBaseline: Double(UserProfile.restingHeartRate),
       qualifiedWindowCount: 0,
       performance: performance,
-      confidence: 1.0
+      confidence: 1.0,
+      sessionID: session.id.uuidString
     )
     let samples = HeartRateSeriesStore.shared.samples(
       from: wakeReference.addingTimeInterval(-18 * 3600),

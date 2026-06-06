@@ -316,8 +316,12 @@ final class WhoopImportedDailyStore: ObservableObject {
       sleepNeedFromDebtMs: existing?.sleepNeedFromDebtMs,
       sleepNeedFromStrainMs: existing?.sleepNeedFromStrainMs,
       sleepNeedFromNapMs: existing?.sleepNeedFromNapMs,
-      strainScore: strainScore ?? existing?.strainScore,
-      strainKilojoules: strainKj ?? existing?.strainKilojoules
+      // Strain/kJ from the typed table can be 0.0 if a goose.local row
+      // was finalized for a day with no HR samples (e.g. before the
+      // strap was capturing). Don't let a zero override WHOOP's real
+      // imported value — prefer non-zero, fall back to existing.
+      strainScore: ((strainScore ?? 0) > 0 ? strainScore : nil) ?? existing?.strainScore,
+      strainKilojoules: ((strainKj ?? 0) > 0 ? strainKj : nil) ?? existing?.strainKilojoules
     )
   }
 

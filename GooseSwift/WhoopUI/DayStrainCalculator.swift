@@ -336,6 +336,12 @@ final class DayStrainStore: ObservableObject {
     let bgFormula = DayStrainCalculator.sedentaryFormula
     var bgEffectiveKJ: Double = 0
     var lastTime: Date?
+    // Track HR zone time across background samples too — previously only
+    // workout zone seconds were accumulated, so days with no logged
+    // workouts wrote empty zone_minutes despite full strap capture. The
+    // Age view's HR Zones cards and the Strain detail view's zone stacks
+    // both rely on this.
+    var allZoneMinutes: [Int: Double] = [:]
     for sample in offWristFiltered.sorted(by: { $0.capturedAt < $1.capturedAt }) {
       let dt: TimeInterval
       if let last = lastTime {
@@ -345,13 +351,14 @@ final class DayStrainStore: ObservableObject {
       }
       lastTime = sample.capturedAt
       bgEffectiveKJ += bgFormula.effectiveKJPerSecond(forBPM: sample.bpm) * dt
+      let zone = HeartRateZone.zoneID(for: sample.bpm)
+      allZoneMinutes[zone, default: 0] += dt / 60.0
     }
     let bgStrain = bgFormula.strain(fromEffectiveKJ: bgEffectiveKJ)
 
     // 2. Group workouts by their formula. Sum eff-kJ within each group,
     // then apply that group's formula to its summed eff-kJ.
     var groups: [String: (formula: DayStrainCalculator.StrainFormula, effectiveKJ: Double)] = [:]
-    var allZoneMinutes: [Int: Double] = [:]
     for workout in workoutsForDay {
       let formula = DayStrainCalculator.formula(forActivityRaw: workout.activityRaw)
       var workoutEffKJ: Double = 0

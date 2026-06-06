@@ -331,21 +331,29 @@ struct StrainDetailView: View {
     }
     trendCard(title: "STRAIN") {
       Chart(points) { point in
-        if let v = point.value {
-          BarMark(
-            x: .value("day", point.dayLetter),
-            y: .value("strain", v),
-            width: .fixed(18)
-          )
-          .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.95))
-          .annotation(position: .top, alignment: .center, spacing: 2) {
-            Text(String(format: "%.1f", v))
-              .font(.system(size: 10, weight: .heavy, design: .rounded))
-              .monospacedDigit()
-              .foregroundStyle(Color(red: 0.4, green: 0.78, blue: 1.0))
-          }
-          .cornerRadius(3)
+        // Render every day's column, even at 0 — a tiny faint stub keeps
+        // the day labels grounded to a visible mark instead of dangling
+        // axis text floating over empty space.
+        let v = point.value ?? 0
+        let visualHeight = max(v, 0.4)
+        let isReal = v > 0
+        BarMark(
+          x: .value("day", point.dayLetter),
+          y: .value("strain", visualHeight),
+          width: .fixed(18)
+        )
+        .foregroundStyle(isReal
+          ? Color(red: 0.18, green: 0.62, blue: 0.95)
+          : Color.white.opacity(0.10))
+        .annotation(position: .top, alignment: .center, spacing: 2) {
+          Text(String(format: "%.1f", v))
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(isReal
+              ? Color(red: 0.4, green: 0.78, blue: 1.0)
+              : Color.white.opacity(0.35))
         }
+        .cornerRadius(3)
       }
       .chartYScale(domain: 0...21)
       .chartYAxis(.hidden)
@@ -360,23 +368,29 @@ struct StrainDetailView: View {
       stepEstimator.history.map { ($0.dateKey, $0.estimatedSteps) }
     )
     let points = weeklyData { key in stepsByKey[key] }
+    let maxSteps = max(points.compactMap { $0.value }.max() ?? 0, 1)
     trendCard(title: "STEPS") {
       Chart(points) { point in
-        if let v = point.value {
-          BarMark(
-            x: .value("day", point.dayLetter),
-            y: .value("steps", v),
-            width: .fixed(18)
-          )
-          .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.95))
-          .annotation(position: .top, alignment: .center, spacing: 2) {
-            Text(formatStepCount(Int(v)))
-              .font(.system(size: 10, weight: .heavy, design: .rounded))
-              .monospacedDigit()
-              .foregroundStyle(Color(red: 0.4, green: 0.78, blue: 1.0))
-          }
-          .cornerRadius(3)
+        let v = point.value ?? 0
+        let visualHeight = max(v, maxSteps * 0.02)
+        let isReal = v > 0
+        BarMark(
+          x: .value("day", point.dayLetter),
+          y: .value("steps", visualHeight),
+          width: .fixed(18)
+        )
+        .foregroundStyle(isReal
+          ? Color(red: 0.18, green: 0.62, blue: 0.95)
+          : Color.white.opacity(0.10))
+        .annotation(position: .top, alignment: .center, spacing: 2) {
+          Text(formatStepCount(Int(v)))
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(isReal
+              ? Color(red: 0.4, green: 0.78, blue: 1.0)
+              : Color.white.opacity(0.35))
         }
+        .cornerRadius(3)
       }
       .chartYAxis(.hidden)
       .chartXAxis { chartXAxis(points) }
@@ -551,23 +565,29 @@ struct StrainDetailView: View {
   @ViewBuilder
   private var caloriesChart: some View {
     let points = weeklyData { key in caloriesForDay(key: key) }
+    let maxKcal = max(points.compactMap { $0.value }.max() ?? 0, 1)
     trendCard(title: "CALORIES") {
       Chart(points) { point in
-        if let v = point.value, v > 0 {
-          BarMark(
-            x: .value("day", point.dayLetter),
-            y: .value("kcal", v),
-            width: .fixed(18)
-          )
-          .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.95))
-          .annotation(position: .top, alignment: .center, spacing: 2) {
-            Text(formatStepCount(Int(v)))
-              .font(.system(size: 10, weight: .heavy, design: .rounded))
-              .monospacedDigit()
-              .foregroundStyle(Color(red: 0.4, green: 0.78, blue: 1.0))
-          }
-          .cornerRadius(3)
+        let v = point.value ?? 0
+        let visualHeight = max(v, maxKcal * 0.02)
+        let isReal = v > 0
+        BarMark(
+          x: .value("day", point.dayLetter),
+          y: .value("kcal", visualHeight),
+          width: .fixed(18)
+        )
+        .foregroundStyle(isReal
+          ? Color(red: 0.18, green: 0.62, blue: 0.95)
+          : Color.white.opacity(0.10))
+        .annotation(position: .top, alignment: .center, spacing: 2) {
+          Text(formatStepCount(Int(v)))
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(isReal
+              ? Color(red: 0.4, green: 0.78, blue: 1.0)
+              : Color.white.opacity(0.35))
         }
+        .cornerRadius(3)
       }
       .chartYAxis(.hidden)
       .chartXAxis { chartXAxis(points) }

@@ -453,32 +453,189 @@ struct RecoveryFactorsDetailView: View {
     )
   }
 
-  // MARK: - Plain-English summary (unchanged from old view)
+  // MARK: - Plain-English summary
+  //
+  // Rebuilt to be honestly informative rather than a fixed HRV bucket:
+  //
+  // 1. Baselines come from the trailing 30 days (was: all-history),
+  //    matching WHOOP's reference window.
+  // 2. Looks at all four factors — HRV, RHR, sleep performance, prior-
+  //    day strain — computes each one's signed deviation from baseline
+  //    (positive = better-than-usual), and picks the worst.
+  // 3. Four bands rather than three: significantly off / mildly off /
+  //    in range / mildly better / significantly better, with phrasing
+  //    + recommendation tailored to the chosen factor.
+  // 4. If nothing is significantly off, says so explicitly instead of
+  //    defaulting to "your HRV is at its usual range".
+
+  private struct FactorDeviation {
+    let kind: Kind
+    enum Kind { case hrv, rhr, sleep, priorStrain }
+    let current: Double
+    let baseline: Double
+    /// Positive = better than baseline. For RHR (lower is better) and
+    /// prior strain (lower is better), this is sign-flipped.
+    let signedPctBetter: Double
+  }
 
   private var plainEnglishSummary: String {
-    guard let score = score, score.confidence > 0 else {
-      return "Need at least 4 days of baseline data to explain today's score."
+    let factors = collectFactorDeviations()
+    if factors.isEmpty {
+      return "Not enough trailing-30-day data to explain today's score yet."
     }
-    var lines: [String] = []
-    if let hrv = score.hrvComponent, let base = score.hrvBaseline {
-      let pct = (hrv - base) / base * 100
-      if pct > 5 {
-        lines.append("Your HRV \(Int(hrv))ms is \(Int(pct))% above its usual range, supporting a strong recovery.")
-      } else if pct < -5 {
-        lines.append("Your HRV \(Int(hrv))ms is \(Int(-pct))% below its usual range, resulting in a depressed recovery. If you can, spend extra time on recovery activities like hydrating and eating healthy.")
-      } else {
-        lines.append("Your HRV \(Int(hrv))ms is right at its usual range.")
-      }
+    // Pick the most-deviated factor (largest absolute value), preferring
+    // the depressed direction when ties are close.
+    let worst = factors.min { absSorting($0) < absSorting($1) }
+      ?? factors[0]
+    return phrase(for: worst)
+  }
+
+  private func absSorting(_ f: FactorDeviation) -> Double {
+    // We want the most-deviated factor. Sort ascending so the most
+    // negative (most-depressed) sorts first; .min returns it.
+    f.signedPctBetter
+  }
+
+  private func collectFactorDeviations() -> [FactorDeviation] {
+    var out: [FactorDeviation] = []
+    let summary = dailyStore.summary(for: selectedDay.currentDate)
+
+    if let hrv = summary?.hrvRmssdMs, let base = trailingMedian(.hrv), base > 0 {
+      out.append(FactorDeviation(
+        kind: .hrv, current: hrv, baseline: base,
+        signedPctBetter: (hrv - base) / base * 100
+      ))
     }
-    if lines.isEmpty, let rhr = score.rhrComponent, let base = score.rhrBaseline {
-      let delta = rhr - base
-      if delta > 2 {
-        lines.append("Your resting HR \(Int(rhr))bpm is \(Int(delta)) above baseline — body still working harder than usual.")
-      } else if delta < -2 {
-        lines.append("Your resting HR \(Int(rhr))bpm is \(Int(-delta)) below baseline — cardiovascular system fully rested.")
-      }
+    if let rhr = summary?.restingHrBpm, let base = trailingMedian(.rhr), base > 0 {
+      // RHR: lower is better, so flip the sign.
+      out.append(FactorDeviation(
+        kind: .rhr, current: rhr, baseline: base,
+        signedPctBetter: -(rhr - base) / base * 100
+      ))
     }
-    return lines.first ?? "Your factors are tracking within their usual ranges."
+    if let sleep = summary?.sleepPerformancePct, let base = trailingMedian(.sleep), base > 0 {
+      out.append(FactorDeviation(
+        kind: .sleep, current: sleep, baseline: base,
+        signedPctBetter: (sleep - base) / base * 100
+      ))
+    }
+    if let prior = priorDayStrain(), let base = trailingMedian(.priorStrain), base > 0 {
+      // High prior strain depresses recovery, so flip the sign.
+      out.append(FactorDeviation(
+        kind: .priorStrain, current: prior, baseline: base,
+        signedPctBetter: -(prior - base) / base * 100
+      ))
+    }
+    return out
+  }
+
+  /// Trailing 30-day median of one factor, using whatever days are in
+  /// dailyStore.byDate. Today's value is excluded so the baseline isn't
+  /// self-referential.
+  private enum FactorKey { case hrv, rhr, sleep, priorStrain }
+  private func trailingMedian(_ key: FactorKey) -> Double? {
+    let cal = Calendar.current
+    let now = Date()
+    guard let cutoff = cal.date(byAdding: .day, value: -30, to: cal.startOfDay(for: now))
+    else { return nil }
+    let todayKey = Self.dateKey(for: now)
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    var values: [Double] = []
+    for (k, day) in dailyStore.byDate {
+      if k == todayKey { continue }
+      guard let d = f.date(from: k), d >= cutoff else { continue }
+      let v: Double? = {
+        switch key {
+        case .hrv: return day.hrvRmssdMs
+        case .rhr: return day.restingHrBpm
+        case .sleep: return day.sleepPerformancePct
+        case .priorStrain: return day.strainScore
+        }
+      }()
+      if let v, v > 0 { values.append(v) }
+    }
+    return Self.median(values)
+  }
+
+  private func priorDayStrain() -> Double? {
+    let cal = Calendar.current
+    guard let yesterday = cal.date(
+      byAdding: .day, value: -1,
+      to: cal.startOfDay(for: selectedDay.currentDate)
+    ) else { return nil }
+    let key = Self.dateKey(for: yesterday)
+    return dailyStore.byDate[key]?.strainScore
+  }
+
+  private static func dateKey(for date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    return f.string(from: date)
+  }
+
+  /// Map a factor deviation to one of five bands and produce phrasing.
+  /// Thresholds: ±20% = significant, ±7% = mild.
+  private func phrase(for dev: FactorDeviation) -> String {
+    let pctBetter = dev.signedPctBetter
+    let absPct = abs(pctBetter)
+    let band: Band = {
+      if pctBetter >= 20 { return .significantlyBetter }
+      if pctBetter >= 7 { return .mildlyBetter }
+      if pctBetter <= -20 { return .significantlyWorse }
+      if pctBetter <= -7 { return .mildlyWorse }
+      return .neutral
+    }()
+    if band == .neutral {
+      return "All your factors are tracking within their usual ranges. Today's recovery reflects the noise floor — no specific signal is depressing or boosting it."
+    }
+    return phrase(kind: dev.kind, current: dev.current, baseline: dev.baseline, absPct: absPct, band: band)
+  }
+
+  private enum Band { case significantlyWorse, mildlyWorse, neutral, mildlyBetter, significantlyBetter }
+
+  private func phrase(kind: FactorDeviation.Kind, current: Double, baseline: Double, absPct: Double, band: Band) -> String {
+    let curStr: String
+    let baseStr: String
+    let factorName: String
+    let recommendation: String
+    switch kind {
+    case .hrv:
+      curStr = "\(Int(current.rounded()))ms"
+      baseStr = "\(Int(baseline.rounded()))ms"
+      factorName = "HRV"
+      recommendation = "hydrating, eating well, and getting to bed on time"
+    case .rhr:
+      curStr = "\(Int(current.rounded()))bpm"
+      baseStr = "\(Int(baseline.rounded()))bpm"
+      factorName = "resting HR"
+      recommendation = "easy aerobic work and limiting alcohol"
+    case .sleep:
+      curStr = "\(Int(current.rounded()))%"
+      baseStr = "\(Int(baseline.rounded()))%"
+      factorName = "sleep performance"
+      recommendation = "an earlier bedtime to hit your need consistently"
+    case .priorStrain:
+      curStr = String(format: "%.1f", current)
+      baseStr = String(format: "%.1f", baseline)
+      factorName = "yesterday's strain"
+      recommendation = "an easy day and extra sleep"
+    }
+    let absPctRounded = Int(absPct.rounded())
+    switch band {
+    case .significantlyWorse:
+      return "Your \(factorName) \(curStr) is \(absPctRounded)% below its 30-day baseline (\(baseStr)) — the biggest signal weighing on today's recovery. Try \(recommendation)."
+    case .mildlyWorse:
+      return "Your \(factorName) \(curStr) is slightly below its 30-day baseline (\(baseStr)). Recovery is dipping a touch — consider \(recommendation) if you feel sluggish."
+    case .mildlyBetter:
+      return "Your \(factorName) \(curStr) is running a bit above its 30-day baseline (\(baseStr)). You're on the right side of your recovery curve."
+    case .significantlyBetter:
+      return "Your \(factorName) \(curStr) is well above its 30-day baseline (\(baseStr)) — this is the strongest signal supporting today's recovery."
+    case .neutral:
+      return ""
+    }
   }
 
   // MARK: - Baselines

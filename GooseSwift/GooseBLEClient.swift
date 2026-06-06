@@ -310,6 +310,18 @@ final class GooseBLEClient: NSObject, ObservableObject {
   let historicalRangeMaxRetries = 2
   let historicalTransferMaxRequestAttempts = 3
   var historicalSyncRunID = UUID()
+  /// Absolute "this sync has been alive too long without progress" watchdog.
+  /// Distinct from `historicalIdleWorkItem` (12s after data arrived) and
+  /// `historicalCommandTimeoutWorkItem` (per-command response). If neither
+  /// of those clear the syncing flag — e.g. strap streamed everything as
+  /// REALTIME_RAW_DATA before we asked, so the historical request gets no
+  /// reply at all — this fires and completes the sync gracefully.
+  var historicalSyncWatchdogWorkItem: DispatchWorkItem?
+  /// Live packets received since this BLE session started — distinct from
+  /// `historicalPacketCount`, which only tracks HISTORICAL_DATA packets.
+  /// Powers a clearer "live X | hist Y" pill so a sync that's "stuck" but
+  /// actually receiving real-time data is visibly making progress.
+  @Published var livePacketCount: Int = 0
   var historicalRangePollOnly = false
   var autoStartedPhysiologyCapture = false
   var autoConnectForPhysiologyCapture = false

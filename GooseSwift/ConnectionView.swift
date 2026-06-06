@@ -132,14 +132,24 @@ private struct ConnectionContentView: View {
   }
 
   private var historicalSyncValue: String {
-    let packetCount = ble.historicalPacketCount
-    let packets = "\(packetCount) \(packetCount == 1 ? "packet" : "packets")"
+    // Show both counters: live (every BLE notification) and historical
+    // (only HISTORICAL_DATA pkt_type 47). A sync that's "stuck" but
+    // actually getting realtime data now reads "live 9.8k | hist 0"
+    // instead of just "syncing | 0 packets" which read as broken.
+    let hist = ble.historicalPacketCount
+    let live = ble.livePacketCount
+    let counts = "live \(formatCount(live)) | hist \(formatCount(hist))"
     if ble.isHistoricalSyncing {
-      return "syncing | \(packets)"
+      return "syncing | \(counts)"
     }
     if let completedAt = ble.lastHistoricalSyncCompletedAt {
-      return "\(ble.historicalSyncStatus) | \(packets) @ \(completedAt.formatted(date: .omitted, time: .standard))"
+      return "\(ble.historicalSyncStatus) | \(counts) @ \(completedAt.formatted(date: .omitted, time: .standard))"
     }
-    return "\(ble.historicalSyncStatus) | \(packets)"
+    return "\(ble.historicalSyncStatus) | \(counts)"
+  }
+
+  private func formatCount(_ n: Int) -> String {
+    if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000) }
+    return "\(n)"
   }
 }

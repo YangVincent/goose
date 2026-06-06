@@ -625,6 +625,7 @@ extension GooseBLEClient {
     historicalCommandTimeoutWorkItem?.cancel()
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
+    historicalSyncWatchdogWorkItem?.cancel()
     readySyncWorkItem?.cancel()
     let sawHistoricalMetadata = historyStartReceived || historyEndReceived || historyCompleteReceived
     pendingHistoricalCommand = nil
@@ -662,6 +663,7 @@ extension GooseBLEClient {
     historicalCommandTimeoutWorkItem?.cancel()
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
+    historicalSyncWatchdogWorkItem?.cancel()
     readySyncWorkItem?.cancel()
     pendingHistoricalCommand = nil
     historyEndAckQueued = false

@@ -66,6 +66,15 @@ extension GooseBLEClient: CBPeripheralDelegate {
   ) {
     let capturedAt = Date()
     let value = characteristic.value
+    // Live counter — every BLE notification, regardless of where it
+    // routes. Separate from historicalPacketCount so the pill can show
+    // "live X | hist Y" and you can see realtime flow even when the
+    // historical sync request itself is silent.
+    if error == nil, value != nil {
+      DispatchQueue.main.async { [weak self] in
+        self?.livePacketCount += 1
+      }
+    }
     if !Thread.isMainThread,
        error == nil,
        let value,

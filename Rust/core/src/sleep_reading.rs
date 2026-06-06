@@ -132,8 +132,14 @@ struct MinuteRow {
     stage: Stage,
 }
 
-fn floor_minute(ms: i64) -> i64 {
-    (ms / 60_000) * 60_000
+/// One epoch = 30 seconds. Matches the clinical PSG / WHOOP convention
+/// and the Swift `SleepStageEstimator.epochSeconds` so the persisted
+/// hypnogram matches the live-computed one bar-for-bar.
+const EPOCH_MS: i64 = 30_000;
+const EPOCHS_PER_MINUTE: i64 = 60_000 / EPOCH_MS;
+
+fn floor_epoch(ms: i64) -> i64 {
+    (ms / EPOCH_MS) * EPOCH_MS
 }
 
 /// Re-aggregate (start_ms, end_ms) of hr/hrv/imu rows into a per-minute table.
@@ -155,7 +161,7 @@ fn build_minute_series(
         while let Some(row) = rows.next()? {
             let t: i64 = row.get(0)?;
             let bpm: i64 = row.get(1)?;
-            hr_per_minute.entry(floor_minute(t)).or_default().push(bpm);
+            hr_per_minute.entry(floor_epoch(t)).or_default().push(bpm);
         }
     }
 
@@ -206,7 +212,7 @@ fn build_minute_series(
                 sq += range * range;
             }
             let mag = sq.sqrt();
-            *movement_per_minute.entry(floor_minute(t)).or_default() += mag;
+            *movement_per_minute.entry(floor_epoch(t)).or_default() += mag;
         }
     }
 
@@ -224,7 +230,7 @@ fn build_minute_series(
         if n == 0 { None } else { Some(sum / n as f64) }
     };
 
-    let start_floor = floor_minute(start_ms);
+    let start_floor = floor_epoch(start_ms);
     let mut rows = Vec::new();
     let mut bucket = start_floor;
     while bucket < end_ms {
@@ -247,7 +253,7 @@ fn build_minute_series(
             rmssd: rmssd_10min_mean(bucket),
             stage: Stage::NotApplicable,
         });
-        bucket += 60_000;
+        bucket += EPOCH_MS;
     }
     Ok(rows)
 }
@@ -332,11 +338,11 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> Classi
 
     // Post-pass: deep sleep physiologically comes in 10-40 minute bouts
     // sandwiched by other sleep stages. Demote any Deep run that is
-    // either (a) shorter than MIN_DEEP_RUN_MIN minutes or (b) touches an
+    // either (a) shorter than MIN_DEEP_RUN_EPOCHS (= 10 minutes at 30s) or (b) touches an
     // Awake/NotApplicable epoch on either side. Without this, brief HR
     // troughs during drowsy or fragmented morning sleep get counted as
     // Deep and inflate depth_score to 100/100 on light-sleep nights.
-    const MIN_DEEP_RUN_MIN: usize = 10;
+    const MIN_DEEP_RUN_EPOCHS: usize = 20;
     let mut i = 0;
     while i < rows.len() {
         if rows[i].stage == Stage::Deep {
@@ -348,7 +354,7 @@ fn classify_rows(rows: &mut [MinuteRow], options: SleepReadingOptions) -> Classi
                 && matches!(rows[i - 1].stage, Stage::Awake | Stage::NotApplicable))
                 || (j < rows.len()
                     && matches!(rows[j].stage, Stage::Awake | Stage::NotApplicable));
-            if (j - i) < MIN_DEEP_RUN_MIN || touches_wake {
+            if (j - i) < MIN_DEEP_RUN_EPOCHS || touches_wake {
                 for row in rows.iter_mut().take(j).skip(i) {
                     row.stage = Stage::Light;
                 }
@@ -383,7 +389,7 @@ fn persist_epochs(conn: &Connection, session_id: &str, rows: &[MinuteRow]) -> Go
     )?;
     for (i, row) in rows.iter().enumerate() {
         let start = row.bucket_ms;
-        let end = row.bucket_ms + 60_000;
+        let end = row.bucket_ms + EPOCH_MS;
         let label = stage_label(&row.stage);
         // hr_std isn't computed yet at the minute-row level — we don't
         // currently track per-minute std. Pass NULL; the consumer can
@@ -405,12 +411,17 @@ fn persist_epochs(conn: &Connection, session_id: &str, rows: &[MinuteRow]) -> Go
 }
 
 fn first_sleep_onset_minutes(rows: &[MinuteRow]) -> Option<i64> {
+    // Onset is declared after 5 continuous minutes of Light/Deep — which
+    // is `5 * EPOCHS_PER_MINUTE` consecutive epochs. The return value is
+    // in minutes (epoch index of the run start ÷ epochs-per-minute).
+    let min_run_epochs = 5 * EPOCHS_PER_MINUTE;
     let mut run = 0i64;
     for (i, r) in rows.iter().enumerate() {
         if matches!(r.stage, Stage::Light | Stage::Deep) {
             run += 1;
-            if run >= 5 {
-                return Some(i as i64 - run + 1);
+            if run >= min_run_epochs {
+                let start_epoch = i as i64 - run + 1;
+                return Some(start_epoch / EPOCHS_PER_MINUTE);
             }
         } else {
             run = 0;
@@ -445,15 +456,18 @@ pub fn compute_sleep_reading(
     let mut rows = build_minute_series(conn, start_ms, end_ms)?;
     let classify = classify_rows(&mut rows, options);
 
-    let tib_min = rows.len() as i64;
-    if tib_min == 0 {
+    // Counts are in 30-second epochs (rows.len() == epoch count);
+    // convert to whole minutes for the persisted SleepReading fields.
+    let tib_epochs = rows.len() as i64;
+    if tib_epochs == 0 {
         return Err(GooseError::message(
             "sleep reading window has zero minutes of data",
         ));
     }
+    let tib_min = tib_epochs / EPOCHS_PER_MINUTE;
 
-    // Persist per-minute epochs so the iOS SleepHypnogramStore can read
-    // them directly on next open instead of re-scanning HR samples and
+    // Persist 30s epochs so the iOS SleepHypnogramStore can read them
+    // directly on next open instead of re-scanning HR samples and
     // re-bucketing in Swift. Only writes when a session_id is provided
     // (callers that don't have one — e.g. ad-hoc range computes — get
     // no persistence and the in-memory reading only).
@@ -461,26 +475,30 @@ pub fn compute_sleep_reading(
         let _ = persist_epochs(conn, session_id, &rows);
     }
 
-    let deep_min = rows.iter().filter(|r| r.stage == Stage::Deep).count() as i64;
-    let light_min = rows.iter().filter(|r| r.stage == Stage::Light).count() as i64;
-    let awake_min = rows
+    let deep_epochs = rows.iter().filter(|r| r.stage == Stage::Deep).count() as i64;
+    let light_epochs = rows.iter().filter(|r| r.stage == Stage::Light).count() as i64;
+    let awake_epochs = rows
         .iter()
         .filter(|r| matches!(r.stage, Stage::Awake | Stage::NotApplicable))
         .count() as i64;
-    let asleep_min = deep_min + light_min;
+    let asleep_epochs = deep_epochs + light_epochs;
+    let deep_min = deep_epochs / EPOCHS_PER_MINUTE;
+    let light_min = light_epochs / EPOCHS_PER_MINUTE;
+    let awake_min = awake_epochs / EPOCHS_PER_MINUTE;
+    let asleep_min = asleep_epochs / EPOCHS_PER_MINUTE;
 
-    let efficiency = if tib_min > 0 {
-        asleep_min as f64 / tib_min as f64
+    let efficiency = if tib_epochs > 0 {
+        asleep_epochs as f64 / tib_epochs as f64
     } else {
         0.0
     };
-    let deep_share = if asleep_min > 0 {
-        deep_min as f64 / asleep_min as f64
+    let deep_share = if asleep_epochs > 0 {
+        deep_epochs as f64 / asleep_epochs as f64
     } else {
         0.0
     };
-    let awake_share = if tib_min > 0 {
-        awake_min as f64 / tib_min as f64
+    let awake_share = if tib_epochs > 0 {
+        awake_epochs as f64 / tib_epochs as f64
     } else {
         0.0
     };
@@ -509,7 +527,8 @@ pub fn compute_sleep_reading(
         .iter()
         .map(|r| r.movement)
         .fold(0.0_f64, |a, b| a.max(b));
-    let movement_burst = rows.iter().filter(|r| r.stage == Stage::Awake).count() as i64;
+    let movement_burst = rows.iter().filter(|r| r.stage == Stage::Awake).count() as i64
+        / EPOCHS_PER_MINUTE;
 
     let duration_hours = asleep_min as f64 / 60.0;
 

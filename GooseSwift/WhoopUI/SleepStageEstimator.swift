@@ -397,8 +397,10 @@ final class SleepHypnogramStore: ObservableObject {
         rmssdMS: rmssd,
         skinTempRaw: nil
       ))
-      // Rust epochs are 60s buckets — 1 minute per row.
-      stageMinutes[stage, default: 0] += 1.0
+      // Rust epochs are 30s buckets — 0.5 min per row. Matches the
+      // Swift live computation's epochSeconds so persisted + live
+      // hypnograms render identically.
+      stageMinutes[stage, default: 0] += 0.5
     }
     return SleepStageEstimator.Hypnogram(
       windowStart: window.onset,

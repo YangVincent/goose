@@ -188,6 +188,8 @@ final class WorkoutLiveActivityController {
       return "FFD60A"
     case .functionalTraining:
       return "8E8E93"
+    case .badminton:
+      return "FFD60A"
     }
   }
 }

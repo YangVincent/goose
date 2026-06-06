@@ -615,6 +615,8 @@ extension GooseAppModel {
       return "rowing"
     case .poolSwim:
       return "swimming"
+    case .badminton:
+      return "badminton"
     }
   }
 
@@ -658,6 +660,8 @@ extension GooseAppModel {
       return "Functional Training"
     case .poolSwim:
       return "Pool Swim"
+    case .badminton:
+      return "Badminton"
     }
   }
 

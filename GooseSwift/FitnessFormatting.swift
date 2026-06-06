@@ -49,6 +49,7 @@ extension ActivityKind {
     case .barre: "Barre"
     case .functionalTraining: "Functional Training"
     case .poolSwim: "Pool Swim"
+    case .badminton: "Badminton"
     }
   }
 }

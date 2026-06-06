@@ -29,6 +29,7 @@ enum ActivityKind: String, CaseIterable, Identifiable {
   case barre
   case functionalTraining
   case poolSwim
+  case badminton
 
   var id: String { rawValue }
 
@@ -53,6 +54,7 @@ enum ActivityKind: String, CaseIterable, Identifiable {
     case .barre: "Barre"
     case .functionalTraining: "Functional Training"
     case .poolSwim: "Pool Swim"
+    case .badminton: "Badminton"
     }
   }
 
@@ -85,6 +87,7 @@ enum ActivityKind: String, CaseIterable, Identifiable {
     case .barre: "figure.flexibility"
     case .functionalTraining: "figure.cross.training"
     case .poolSwim: "figure.pool.swim"
+    case .badminton: "figure.badminton"
     }
   }
 
@@ -109,6 +112,7 @@ enum ActivityKind: String, CaseIterable, Identifiable {
     case .barre: .pink
     case .functionalTraining: .gray
     case .poolSwim: .cyan
+    case .badminton: .yellow
     }
   }
 
@@ -118,7 +122,7 @@ enum ActivityKind: String, CaseIterable, Identifiable {
       .outdoor
     case .poolSwim:
       .pool
-    case .indoorRun, .indoorWalk, .strength, .hiit, .yoga, .row, .indoorRide, .elliptical, .stairStepper, .pilates, .barre, .functionalTraining:
+    case .indoorRun, .indoorWalk, .strength, .hiit, .yoga, .row, .indoorRide, .elliptical, .stairStepper, .pilates, .barre, .functionalTraining, .badminton:
       .indoor
     }
   }
@@ -148,6 +152,7 @@ enum ActivityKind: String, CaseIterable, Identifiable {
     case .barre: "Muscular endurance, control, and steady effort"
     case .functionalTraining: "Mixed-modal work, peaks, and recovery"
     case .poolSwim: "Session time, HR response, and lap support later"
+    case .badminton: "Repeated rallies, HR spikes, and recovery between points"
     }
   }
 }

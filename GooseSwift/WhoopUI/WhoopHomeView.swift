@@ -341,7 +341,13 @@ struct WhoopHomeView: View {
         )
       }
       .buttonStyle(.plain)
-      NavigationLink(value: WhoopMetric.recovery) {
+      NavigationLink {
+        // Use a destination-based NavigationLink so the push works even
+        // though the home tab's NavigationStack is typed [HealthRoute] —
+        // a value-based NavigationLink(value: WhoopMetric.recovery)
+        // silently no-ops on a path of a different type.
+        RecoveryFactorsDetailView()
+      } label: {
         recoveryRingHero(
           value: resolvedRecovery.source == .none ? nil : recoveryValue,
           color: recoveryColor,
@@ -349,7 +355,9 @@ struct WhoopHomeView: View {
         )
       }
       .buttonStyle(.plain)
-      NavigationLink(value: WhoopMetric.strain) {
+      NavigationLink {
+        StrainDetailView()
+      } label: {
         strainRingHero(
           value: resolvedStrainTuple.value,
           color: strainColor,

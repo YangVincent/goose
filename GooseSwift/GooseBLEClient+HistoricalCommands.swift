@@ -4,6 +4,41 @@ import OSLog
 
 
 extension GooseBLEClient {
+  /// Foreground / app-open hook. Triggers a historical sync only if:
+  /// - BLE is connected + ready (otherwise the sync would fail loudly)
+  /// - We're not already syncing
+  /// - The last successful sync is older than `staleAfter` (or has
+  ///   never completed in this app session)
+  ///
+  /// Safe to call from any thread; bounces to main internally. No-ops
+  /// if any precondition isn't met — won't surface an error toast on
+  /// the user from a routine app-foreground.
+  func triggerForegroundSyncIfStale(staleAfter: TimeInterval = 5 * 60) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      guard self.connectionState == "ready",
+            self.activePeripheral != nil,
+            self.commandCharacteristic != nil,
+            self.supportsV5HistoricalSync,
+            !self.isHistoricalSyncing else {
+        return
+      }
+      let needsSync: Bool
+      if let last = self.lastHistoricalSyncCompletedAt {
+        needsSync = Date().timeIntervalSince(last) > staleAfter
+      } else {
+        needsSync = true
+      }
+      guard needsSync else { return }
+      self.record(
+        source: "ble.sync",
+        title: "historical_sync.foreground_trigger",
+        body: "last_sync=\(self.lastHistoricalSyncCompletedAt.map { String(describing: $0) } ?? "never") stale_after=\(Int(staleAfter))s"
+      )
+      self.beginHistoricalSync(trigger: "foreground.stale", automatic: true)
+    }
+  }
+
   func beginHistoricalSync(
     trigger: String,
     automatic: Bool,

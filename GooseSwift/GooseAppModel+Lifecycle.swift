@@ -6,6 +6,15 @@ extension GooseAppModel {
   func handleAppLifecycleChange(_ phase: String) {
     let power = Self.currentOvernightPowerState()
     ble.record(source: "app.lifecycle", title: "scene_phase", body: "\(phase) | \(power.summary)")
+    // On foreground: trigger a historical catch-up sync IF the last
+    // successful sync is older than 5 minutes (or never completed this
+    // session). Cheap when BLE has stayed connected — the no-op path
+    // exits early — and useful when iPhone deep-sleep briefly paused
+    // notifications or the strap restarted. Runs regardless of overnight
+    // guard so a casual app open during the day also benefits.
+    if phase == "active" || phase == "foreground" {
+      ble.triggerForegroundSyncIfStale(staleAfter: 5 * 60)
+    }
     guard overnightGuardActive else {
       return
     }
